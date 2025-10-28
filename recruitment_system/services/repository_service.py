@@ -1,13 +1,9 @@
-# Бизнес-логика для работы с БД (CRUD операции)
-
-
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from datetime import datetime
-
-# Исправленные импорты
+from datetime import date
 from models.dao import (
-    User, UserRole, HRProfile, Resume, Vacancy, 
-    VacancyStatus, InterviewStage1, InterviewStage2, 
+    UserProfile, Resume, HRProfile, HRAdditionalInfo,
+    Vacancy, VacancyStatus, InterviewStage1, InterviewStage2,
     CandidateReport
 )
 from repository import DatabaseRepository
@@ -16,31 +12,27 @@ from repository import DatabaseRepository
 class RecruitmentService:
     """
     Сервис для работы с данными системы рекрутинга.
-    Реализует все CRUD-операции.
+    Реализует все CRUD-операции для новой архитектуры.
     """
     
     def __init__(self, db_repository: DatabaseRepository):
         self.db = db_repository
     
-    # ========== CRUD для User ==========
+    # ========== CRUD для UserProfile (Кандидаты) ==========
     
-    def create_user(
+    def create_user_profile(
         self,
         login: str,
         password_hash: str,
-        email: str,
-        full_name: str,
-        role: UserRole
-    ) -> User:
-        """Создание нового пользователя"""
+        email: str
+    ) -> UserProfile:
+        """Создание профиля кандидата"""
         session = self.db.get_session()
         try:
-            user = User(
+            user = UserProfile(
                 login=login,
                 password_hash=password_hash,
-                email=email,
-                full_name=full_name,
-                role=role
+                email=email
             )
             session.add(user)
             session.commit()
@@ -52,56 +44,35 @@ class RecruitmentService:
         finally:
             session.close()
     
-    def get_user_by_id(self, user_id: int) -> Optional[User]:
-        """Получение пользователя по ID"""
+    def get_user_profile_by_id(self, user_id: int) -> Optional[UserProfile]:
+        """Получение профиля кандидата по ID"""
         session = self.db.get_session()
         try:
-            return session.query(User).filter(User.user_id == user_id).first()
+            return session.query(UserProfile).filter(UserProfile.user_id == user_id).first()
         finally:
             session.close()
     
-    def get_user_by_login(self, login: str) -> Optional[User]:
-        """Получение пользователя по логину"""
+    def get_user_profile_by_login(self, login: str) -> Optional[UserProfile]:
+        """Получение профиля кандидата по логину"""
         session = self.db.get_session()
         try:
-            return session.query(User).filter(User.login == login).first()
+            return session.query(UserProfile).filter(UserProfile.login == login).first()
         finally:
             session.close()
     
-    def get_all_users(self, role: Optional[UserRole] = None) -> List[User]:
-        """Получение всех пользователей, опционально с фильтром по роли"""
+    def get_all_user_profiles(self) -> List[UserProfile]:
+        """Получение всех профилей кандидатов"""
         session = self.db.get_session()
         try:
-            query = session.query(User)
-            if role:
-                query = query.filter(User.role == role)
-            return query.all()
+            return session.query(UserProfile).all()
         finally:
             session.close()
     
-    def update_user(self, user_id: int, **kwargs) -> Optional[User]:
-        """Обновление данных пользователя"""
+    def delete_user_profile(self, user_id: int) -> bool:
+        """Удаление профиля кандидата"""
         session = self.db.get_session()
         try:
-            user = session.query(User).filter(User.user_id == user_id).first()
-            if user:
-                for key, value in kwargs.items():
-                    if hasattr(user, key):
-                        setattr(user, key, value)
-                session.commit()
-                session.refresh(user)
-            return user
-        except Exception as e:
-            session.rollback()
-            raise e
-        finally:
-            session.close()
-    
-    def delete_user(self, user_id: int) -> bool:
-        """Удаление пользователя"""
-        session = self.db.get_session()
-        try:
-            user = session.query(User).filter(User.user_id == user_id).first()
+            user = session.query(UserProfile).filter(UserProfile.user_id == user_id).first()
             if user:
                 session.delete(user)
                 session.commit()
@@ -113,17 +84,144 @@ class RecruitmentService:
         finally:
             session.close()
     
+    # ========== CRUD для Resume ==========
+    
+    def create_resume(
+        self,
+        user_id: int,
+        full_name: str,
+        birth_date: Optional[date] = None,
+        contact_phone: Optional[str] = None,
+        contact_email: Optional[str] = None,
+        education: Optional[str] = None,
+        work_experience: Optional[str] = None,
+        skills: Optional[str] = None
+    ) -> Resume:
+        """Создание резюме для кандидата"""
+        session = self.db.get_session()
+        try:
+            resume = Resume(
+                user_id=user_id,
+                full_name=full_name,
+                birth_date=birth_date,
+                contact_phone=contact_phone,
+                contact_email=contact_email,
+                education=education,
+                work_experience=work_experience,
+                skills=skills
+            )
+            session.add(resume)
+            session.commit()
+            session.refresh(resume)
+            return resume
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+    
+    def get_resume_by_user_id(self, user_id: int) -> Optional[Resume]:
+        """Получение резюме кандидата"""
+        session = self.db.get_session()
+        try:
+            return session.query(Resume).filter(Resume.user_id == user_id).first()
+        finally:
+            session.close()
+    
+    # ========== CRUD для HRProfile ==========
+    
+    def create_hr_profile(
+        self,
+        login: str,
+        password_hash: str,
+        email: str
+    ) -> HRProfile:
+        """Создание профиля HR"""
+        session = self.db.get_session()
+        try:
+            hr = HRProfile(
+                login=login,
+                password_hash=password_hash,
+                email=email
+            )
+            session.add(hr)
+            session.commit()
+            session.refresh(hr)
+            return hr
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+    
+    def get_hr_profile_by_id(self, hr_id: int) -> Optional[HRProfile]:
+        """Получение профиля HR по ID"""
+        session = self.db.get_session()
+        try:
+            return session.query(HRProfile).filter(HRProfile.hr_id == hr_id).first()
+        finally:
+            session.close()
+    
+    def get_hr_profile_by_login(self, login: str) -> Optional[HRProfile]:
+        """Получение профиля HR по логину"""
+        session = self.db.get_session()
+        try:
+            return session.query(HRProfile).filter(HRProfile.login == login).first()
+        finally:
+            session.close()
+    
+    # ========== CRUD для HRAdditionalInfo ==========
+    
+    def create_hr_additional_info(
+        self,
+        hr_id: int,
+        full_name: str,
+        position: Optional[str] = None,
+        contact_phone: Optional[str] = None,
+        company_name: Optional[str] = None
+    ) -> HRAdditionalInfo:
+        """Создание дополнительной информации HR"""
+        session = self.db.get_session()
+        try:
+            info = HRAdditionalInfo(
+                hr_id=hr_id,
+                full_name=full_name,
+                position=position,
+                contact_phone=contact_phone,
+                company_name=company_name
+            )
+            session.add(info)
+            session.commit()
+            session.refresh(info)
+            return info
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+    
+    def get_hr_additional_info(self, hr_id: int) -> Optional[HRAdditionalInfo]:
+        """Получение дополнительной информации HR"""
+        session = self.db.get_session()
+        try:
+            return session.query(HRAdditionalInfo).filter(
+                HRAdditionalInfo.hr_id == hr_id
+            ).first()
+        finally:
+            session.close()
+    
     # ========== CRUD для Vacancy ==========
     
     def create_vacancy(
         self,
         hr_id: int,
         position_title: str,
-        job_description: str,
-        requirements: str,
+        job_description: Optional[str] = None,
+        requirements: Optional[str] = None,
+        questions: Optional[str] = None,
         status: VacancyStatus = VacancyStatus.OPEN
     ) -> Vacancy:
-        """Создание новой вакансии"""
+        """Создание вакансии"""
         session = self.db.get_session()
         try:
             vacancy = Vacancy(
@@ -131,6 +229,7 @@ class RecruitmentService:
                 position_title=position_title,
                 job_description=job_description,
                 requirements=requirements,
+                questions=questions,
                 status=status
             )
             session.add(vacancy)
@@ -151,16 +250,16 @@ class RecruitmentService:
         finally:
             session.close()
     
-    def get_vacancies_by_hr(self, hr_id: int) -> List[Vacancy]:
-        """Получение всех вакансий HR-менеджера"""
+    def get_all_vacancies(self) -> List[Vacancy]:
+        """Получение всех вакансий"""
         session = self.db.get_session()
         try:
-            return session.query(Vacancy).filter(Vacancy.hr_id == hr_id).all()
+            return session.query(Vacancy).all()
         finally:
             session.close()
     
     def get_open_vacancies(self) -> List[Vacancy]:
-        """Получение всех открытых вакансий"""
+        """Получение открытых вакансий"""
         session = self.db.get_session()
         try:
             return session.query(Vacancy).filter(
@@ -169,37 +268,11 @@ class RecruitmentService:
         finally:
             session.close()
     
-    def update_vacancy(self, vacancy_id: int, **kwargs) -> Optional[Vacancy]:
-        """Обновление вакансии"""
-        session = self.db.get_session()
-        try:
-            vacancy = session.query(Vacancy).filter(
-                Vacancy.vacancy_id == vacancy_id
-            ).first()
-            if vacancy:
-                for key, value in kwargs.items():
-                    if hasattr(vacancy, key):
-                        setattr(vacancy, key, value)
-                session.commit()
-                session.refresh(vacancy)
-            return vacancy
-        except Exception as e:
-            session.rollback()
-            raise e
-        finally:
-            session.close()
-    
-    def close_vacancy(self, vacancy_id: int) -> Optional[Vacancy]:
-        """Закрытие вакансии"""
-        return self.update_vacancy(vacancy_id, status=VacancyStatus.CLOSED)
-    
     def delete_vacancy(self, vacancy_id: int) -> bool:
         """Удаление вакансии"""
         session = self.db.get_session()
         try:
-            vacancy = session.query(Vacancy).filter(
-                Vacancy.vacancy_id == vacancy_id
-            ).first()
+            vacancy = session.query(Vacancy).filter(Vacancy.vacancy_id == vacancy_id).first()
             if vacancy:
                 session.delete(vacancy)
                 session.commit()
@@ -211,7 +284,7 @@ class RecruitmentService:
         finally:
             session.close()
     
-    # ========== CRUD для Interview Stage 1 ==========
+    # ========== CRUD для InterviewStage1 ==========
     
     def create_interview_stage1(
         self,
@@ -221,10 +294,10 @@ class RecruitmentService:
         interview_date: datetime,
         questions: Optional[str] = None,
         candidate_answers: Optional[str] = None,
-        soft_skills_score: Optional[int] = None,
-        confidence_score: Optional[int] = None
+        video_recording_path: Optional[str] = None,
+        soft_skills_score: Optional[int] = None
     ) -> InterviewStage1:
-        """Создание записи о первом этапе собеседования"""
+        """Создание первого этапа собеседования"""
         session = self.db.get_session()
         try:
             interview = InterviewStage1(
@@ -234,8 +307,8 @@ class RecruitmentService:
                 interview_date=interview_date,
                 questions=questions,
                 candidate_answers=candidate_answers,
-                soft_skills_score=soft_skills_score,
-                confidence_score=confidence_score
+                video_recording_path=video_recording_path,
+                soft_skills_score=soft_skills_score
             )
             session.add(interview)
             session.commit()
@@ -248,7 +321,7 @@ class RecruitmentService:
             session.close()
     
     def get_interview_stage1_by_id(self, interview1_id: int) -> Optional[InterviewStage1]:
-        """Получение записи первого этапа по ID"""
+        """Получение первого этапа по ID"""
         session = self.db.get_session()
         try:
             return session.query(InterviewStage1).filter(
@@ -257,41 +330,7 @@ class RecruitmentService:
         finally:
             session.close()
     
-    def get_interviews_stage1_by_candidate(self, user_id: int) -> List[InterviewStage1]:
-        """Получение всех первых этапов собеседований кандидата"""
-        session = self.db.get_session()
-        try:
-            return session.query(InterviewStage1).filter(
-                InterviewStage1.user_id == user_id
-            ).all()
-        finally:
-            session.close()
-    
-    def update_interview_stage1(
-        self,
-        interview1_id: int,
-        **kwargs
-    ) -> Optional[InterviewStage1]:
-        """Обновление записи первого этапа"""
-        session = self.db.get_session()
-        try:
-            interview = session.query(InterviewStage1).filter(
-                InterviewStage1.interview1_id == interview1_id
-            ).first()
-            if interview:
-                for key, value in kwargs.items():
-                    if hasattr(interview, key):
-                        setattr(interview, key, value)
-                session.commit()
-                session.refresh(interview)
-            return interview
-        except Exception as e:
-            session.rollback()
-            raise e
-        finally:
-            session.close()
-    
-    # ========== CRUD для Interview Stage 2 ==========
+    # ========== CRUD для InterviewStage2 ==========
     
     def create_interview_stage2(
         self,
@@ -303,10 +342,9 @@ class RecruitmentService:
         technical_tasks: Optional[str] = None,
         candidate_solutions: Optional[str] = None,
         video_recording_path: Optional[str] = None,
-        hard_skills_score: Optional[int] = None,
-        final_result: Optional[str] = None
+        hard_skills_score: Optional[int] = None
     ) -> InterviewStage2:
-        """Создание записи о втором этапе собеседования"""
+        """Создание второго этапа собеседования"""
         session = self.db.get_session()
         try:
             interview = InterviewStage2(
@@ -318,8 +356,7 @@ class RecruitmentService:
                 technical_tasks=technical_tasks,
                 candidate_solutions=candidate_solutions,
                 video_recording_path=video_recording_path,
-                hard_skills_score=hard_skills_score,
-                final_result=final_result
+                hard_skills_score=hard_skills_score
             )
             session.add(interview)
             session.commit()
@@ -331,17 +368,7 @@ class RecruitmentService:
         finally:
             session.close()
     
-    def get_interview_stage2_by_id(self, interview2_id: int) -> Optional[InterviewStage2]:
-        """Получение записи второго этапа по ID"""
-        session = self.db.get_session()
-        try:
-            return session.query(InterviewStage2).filter(
-                InterviewStage2.interview2_id == interview2_id
-            ).first()
-        finally:
-            session.close()
-    
-    # ========== CRUD для Candidate Report ==========
+    # ========== CRUD для CandidateReport ==========
     
     def create_candidate_report(
         self,
@@ -375,32 +402,12 @@ class RecruitmentService:
         finally:
             session.close()
     
-    def get_report_by_id(self, report_id: int) -> Optional[CandidateReport]:
-        """Получение отчета по ID"""
-        session = self.db.get_session()
-        try:
-            return session.query(CandidateReport).filter(
-                CandidateReport.report_id == report_id
-            ).first()
-        finally:
-            session.close()
-    
     def get_reports_by_candidate(self, user_id: int) -> List[CandidateReport]:
         """Получение всех отчетов кандидата"""
         session = self.db.get_session()
         try:
             return session.query(CandidateReport).filter(
                 CandidateReport.user_id == user_id
-            ).all()
-        finally:
-            session.close()
-    
-    def get_reports_by_vacancy(self, vacancy_id: int) -> List[CandidateReport]:
-        """Получение всех отчетов по вакансии"""
-        session = self.db.get_session()
-        try:
-            return session.query(CandidateReport).filter(
-                CandidateReport.vacancy_id == vacancy_id
             ).all()
         finally:
             session.close()
