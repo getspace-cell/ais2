@@ -3,29 +3,24 @@ from .dao import (
     Base,
     UserRole,
     VacancyStatus,
-    UserProfile,
-    HRProfile,
-    HRAdditionalInfo,
+    User,
     Resume,
     Vacancy,
     InterviewStage1,
     InterviewStage2,
-    CandidateReport
+    CandidateReport,
 )
 
 __all__ = [
     'Base',
     'UserRole',
     'VacancyStatus',
-    'UserProfile',
-    'HRProfile',
-    'HRAdditionalInfo',
+    'User',
     'Resume',
     'Vacancy',
     'InterviewStage1',
     'InterviewStage2',
-    'CandidateReport',
-    
+    'CandidateReport'
 ]
 
 __version__ = '1.0.0'

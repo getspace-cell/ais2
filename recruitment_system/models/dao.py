@@ -1,6 +1,6 @@
 # ============================================================================
 # ФАЙЛ: models/dao.py
-# Описание: Объектно-реляционное отображение таблиц БД (ПРАВИЛЬНАЯ АРХИТЕКТУРА)
+# Описание: Объектно-реляционное отображение таблиц БД
 # ============================================================================
 
 from datetime import datetime
@@ -30,44 +30,83 @@ class VacancyStatus(enum.Enum):
 
 
 # ============================================================================
-# КАНДИДАТЫ
+# ЕДИНАЯ ТАБЛИЦА ПОЛЬЗОВАТЕЛЕЙ (для авторизации)
 # ============================================================================
 
-class UserProfile(Base):
+class User(Base):
     """
-    Профиль кандидата, проходящего собеседование.
-    Базовая информация для входа в систему.
+    Единая таблица пользователей для авторизации.
+    Содержит HR и Кандидатов.
     """
-    __tablename__ = 'user_profiles'
+    __tablename__ = 'users'
 
     user_id = Column(Integer, primary_key=True, autoincrement=True)
-    login = Column(String(50), unique=True, nullable=False)
+    login = Column(String(50), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
-    email = Column(String(100), unique=True, nullable=False)
+    email = Column(String(100), unique=True, nullable=False, index=True)
+    full_name = Column(String(100), nullable=False)
+    role = Column(SQLEnum(UserRole), nullable=False)
     registration_date = Column(DateTime, default=datetime.utcnow)
-
+    
     # Отношения
     resume = relationship("Resume", back_populates="user", uselist=False, cascade="all, delete-orphan")
-    interviews_stage1 = relationship("InterviewStage1", back_populates="candidate", cascade="all, delete-orphan")
-    interviews_stage2 = relationship("InterviewStage2", back_populates="candidate", cascade="all, delete-orphan")
-    reports = relationship("CandidateReport", back_populates="candidate", cascade="all, delete-orphan")
+    vacancies = relationship("Vacancy", back_populates="hr", cascade="all, delete-orphan")
+    interviews_stage1_as_candidate = relationship(
+        "InterviewStage1", 
+        foreign_keys="InterviewStage1.candidate_id",
+        back_populates="candidate", 
+        cascade="all, delete-orphan"
+    )
+    interviews_stage1_as_hr = relationship(
+        "InterviewStage1",
+        foreign_keys="InterviewStage1.hr_id", 
+        back_populates="hr",
+        cascade="all, delete-orphan"
+    )
+    interviews_stage2_as_candidate = relationship(
+        "InterviewStage2",
+        foreign_keys="InterviewStage2.candidate_id",
+        back_populates="candidate",
+        cascade="all, delete-orphan"
+    )
+    interviews_stage2_as_hr = relationship(
+        "InterviewStage2",
+        foreign_keys="InterviewStage2.hr_id",
+        back_populates="hr",
+        cascade="all, delete-orphan"
+    )
+    reports_as_candidate = relationship(
+        "CandidateReport",
+        foreign_keys="CandidateReport.candidate_id",
+        back_populates="candidate",
+        cascade="all, delete-orphan"
+    )
+    reports_as_hr = relationship(
+        "CandidateReport",
+        foreign_keys="CandidateReport.hr_id",
+        back_populates="hr",
+        cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
-        return f"<UserProfile(id={self.user_id}, login='{self.login}')>"
+        return f"<User(id={self.user_id}, login='{self.login}', role='{self.role.value}')>"
 
+
+# ============================================================================
+# РЕЗЮМЕ
+# ============================================================================
 
 class Resume(Base):
     """
     Резюме кандидата.
-    Связано один-к-одному с UserProfile.
+    Связано один-к-одному с User (где role=CANDIDATE).
     """
     __tablename__ = 'resumes'
 
     resume_id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('user_profiles.user_id'), unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey('users.user_id'), unique=True, nullable=False)
     
     # Личные данные
-    full_name = Column(String(100), nullable=False)
     birth_date = Column(Date)
     contact_phone = Column(String(20))
     contact_email = Column(String(100))
@@ -80,63 +119,10 @@ class Resume(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Отношения
-    user = relationship("UserProfile", back_populates="resume")
+    user = relationship("User", back_populates="resume")
 
     def __repr__(self) -> str:
-        return f"<Resume(id={self.resume_id}, user_id={self.user_id}, name='{self.full_name}')>"
-
-
-# ============================================================================
-# HR МЕНЕДЖЕРЫ
-# ============================================================================
-
-class HRProfile(Base):
-    """
-    Профиль HR-менеджера.
-    Базовая информация для входа в систему.
-    """
-    __tablename__ = 'hr_profiles'
-
-    hr_id = Column(Integer, primary_key=True, autoincrement=True)
-    login = Column(String(50), unique=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
-    email = Column(String(100), unique=True, nullable=False)
-    registration_date = Column(DateTime, default=datetime.utcnow)
-
-    # Отношения
-    additional_info = relationship("HRAdditionalInfo", back_populates="hr", uselist=False, cascade="all, delete-orphan")
-    vacancies = relationship("Vacancy", back_populates="hr", cascade="all, delete-orphan")
-    interviews_stage1 = relationship("InterviewStage1", back_populates="hr", cascade="all, delete-orphan")
-    interviews_stage2 = relationship("InterviewStage2", back_populates="hr", cascade="all, delete-orphan")
-    reports = relationship("CandidateReport", back_populates="hr", cascade="all, delete-orphan")
-
-    def __repr__(self) -> str:
-        return f"<HRProfile(id={self.hr_id}, login='{self.login}')>"
-
-
-class HRAdditionalInfo(Base):
-    """
-    Дополнительная информация об HR.
-    Используется для статистики и контактов.
-    Связана один-к-одному с HRProfile.
-    """
-    __tablename__ = 'hr_additional_info'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    hr_id = Column(Integer, ForeignKey('hr_profiles.hr_id'), unique=True, nullable=False)
-    
-    full_name = Column(String(100), nullable=False)
-    position = Column(String(100))
-    contact_phone = Column(String(20))
-    company_name = Column(String(100))
-    
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    # Отношения
-    hr = relationship("HRProfile", back_populates="additional_info")
-
-    def __repr__(self) -> str:
-        return f"<HRAdditionalInfo(hr_id={self.hr_id}, name='{self.full_name}')>"
+        return f"<Resume(id={self.resume_id}, user_id={self.user_id})>"
 
 
 # ============================================================================
@@ -151,18 +137,17 @@ class Vacancy(Base):
     __tablename__ = 'vacancies'
 
     vacancy_id = Column(Integer, primary_key=True, autoincrement=True)
-    hr_id = Column(Integer, ForeignKey('hr_profiles.hr_id'), nullable=False)
+    hr_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
     
     position_title = Column(String(100), nullable=False)
     job_description = Column(Text)
     requirements = Column(Text)
-    questions = Column(Text, comment="Вопросы для собеседования")
     status = Column(SQLEnum(VacancyStatus), default=VacancyStatus.OPEN)
     
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Отношения
-    hr = relationship("HRProfile", back_populates="vacancies")
+    hr = relationship("User", back_populates="vacancies")
     interviews_stage1 = relationship("InterviewStage1", back_populates="vacancy", cascade="all, delete-orphan")
     interviews_stage2 = relationship("InterviewStage2", back_populates="vacancy", cascade="all, delete-orphan")
     reports = relationship("CandidateReport", back_populates="vacancy", cascade="all, delete-orphan")
@@ -178,64 +163,61 @@ class Vacancy(Base):
 class InterviewStage1(Base):
     """
     Первый этап собеседования - оценка soft skills.
-    Включает видеозапись и оценку.
     """
     __tablename__ = 'interview_stage1'
 
     interview1_id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('user_profiles.user_id'), nullable=False)
-    hr_id = Column(Integer, ForeignKey('hr_profiles.hr_id'), nullable=False)
+    candidate_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
+    hr_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
     vacancy_id = Column(Integer, ForeignKey('vacancies.vacancy_id'), nullable=False)
     
     interview_date = Column(DateTime, nullable=False)
     questions = Column(Text, comment="Вопросы заданные на собеседовании")
     candidate_answers = Column(Text, comment="Ответы кандидата")
-    video_recording_path = Column(String(255), comment="Путь к видеозаписи")
     soft_skills_score = Column(Integer, comment="Оценка soft skills 0-100")
+    confidence_score = Column(Integer, comment="Оценка уверенности 0-100")
     
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Отношения
-    candidate = relationship("UserProfile", back_populates="interviews_stage1")
-    hr = relationship("HRProfile", back_populates="interviews_stage1")
+    candidate = relationship("User", foreign_keys=[candidate_id], back_populates="interviews_stage1_as_candidate")
+    hr = relationship("User", foreign_keys=[hr_id], back_populates="interviews_stage1_as_hr")
     vacancy = relationship("Vacancy", back_populates="interviews_stage1")
     stage2 = relationship("InterviewStage2", back_populates="stage1", uselist=False, cascade="all, delete-orphan")
     reports = relationship("CandidateReport", back_populates="interview1")
 
     def __repr__(self) -> str:
-        return f"<InterviewStage1(id={self.interview1_id}, candidate_id={self.user_id}, score={self.soft_skills_score})>"
+        return f"<InterviewStage1(id={self.interview1_id}, candidate_id={self.candidate_id})>"
 
 
 class InterviewStage2(Base):
     """
     Второй этап собеседования - техническая оценка (hard skills).
-    Включает видеозапись и технические задания.
     """
     __tablename__ = 'interview_stage2'
 
     interview2_id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('user_profiles.user_id'), nullable=False)
-    hr_id = Column(Integer, ForeignKey('hr_profiles.hr_id'), nullable=False)
+    candidate_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
+    hr_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
     interview1_id = Column(Integer, ForeignKey('interview_stage1.interview1_id'), nullable=False)
     vacancy_id = Column(Integer, ForeignKey('vacancies.vacancy_id'), nullable=False)
     
     interview_date = Column(DateTime, nullable=False)
     technical_tasks = Column(Text, comment="Технические задания")
     candidate_solutions = Column(Text, comment="Решения кандидата")
-    video_recording_path = Column(String(255), comment="Путь к видеозаписи")
     hard_skills_score = Column(Integer, comment="Оценка hard skills 0-100")
     
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Отношения
-    candidate = relationship("UserProfile", back_populates="interviews_stage2")
-    hr = relationship("HRProfile", back_populates="interviews_stage2")
+    candidate = relationship("User", foreign_keys=[candidate_id], back_populates="interviews_stage2_as_candidate")
+    hr = relationship("User", foreign_keys=[hr_id], back_populates="interviews_stage2_as_hr")
     stage1 = relationship("InterviewStage1", back_populates="stage2")
     vacancy = relationship("Vacancy", back_populates="interviews_stage2")
     reports = relationship("CandidateReport", back_populates="interview2")
 
     def __repr__(self) -> str:
-        return f"<InterviewStage2(id={self.interview2_id}, candidate_id={self.user_id}, score={self.hard_skills_score})>"
+        return f"<InterviewStage2(id={self.interview2_id}, candidate_id={self.candidate_id})>"
 
 
 # ============================================================================
@@ -250,8 +232,8 @@ class CandidateReport(Base):
     __tablename__ = 'candidate_reports'
 
     report_id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('user_profiles.user_id'), nullable=False)
-    hr_id = Column(Integer, ForeignKey('hr_profiles.hr_id'), nullable=False)
+    candidate_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
+    hr_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
     vacancy_id = Column(Integer, ForeignKey('vacancies.vacancy_id'), nullable=False)
     interview1_id = Column(Integer, ForeignKey('interview_stage1.interview1_id'))
     interview2_id = Column(Integer, ForeignKey('interview_stage2.interview2_id'))
@@ -263,12 +245,11 @@ class CandidateReport(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Отношения
-    candidate = relationship("UserProfile", back_populates="reports")
-    hr = relationship("HRProfile", back_populates="reports")
+    candidate = relationship("User", foreign_keys=[candidate_id], back_populates="reports_as_candidate")
+    hr = relationship("User", foreign_keys=[hr_id], back_populates="reports_as_hr")
     vacancy = relationship("Vacancy", back_populates="reports")
     interview1 = relationship("InterviewStage1", back_populates="reports")
     interview2 = relationship("InterviewStage2", back_populates="reports")
 
     def __repr__(self) -> str:
-        return f"<CandidateReport(id={self.report_id}, candidate_id={self.user_id}, score={self.final_score})>"
-
+        return f"<CandidateReport(id={self.report_id}, candidate_id={self.candidate_id}, score={self.final_score})>"
