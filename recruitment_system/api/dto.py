@@ -133,6 +133,7 @@ class VacancyResponseDTO(BaseModel):
     position_title: str
     job_description: Optional[str]
     requirements: Optional[str]
+    questions: Optional[list]
     status: str
     created_at: datetime
     
@@ -279,3 +280,126 @@ class MessageDTO(BaseModel):
     """DTO для простых сообщений"""
     message: str
     detail: Optional[str] = None
+
+from pydantic import BaseModel, Field
+from typing import List, Optional
+
+# ========== Resume Upload DTO ==========
+
+class UploadResumesResponseDTO(BaseModel):
+    """DTO для ответа после загрузки резюме"""
+    message: str
+    created_candidates: List[dict] = Field(..., description="Список созданных кандидатов")
+    total_processed: int
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "Резюме успешно обработаны",
+                "created_candidates": [
+                    {
+                        "user_id": 10,
+                        "full_name": "Иван Иванов",
+                        "email": "ivan@email.com",
+                        "login": "candidate_10",
+                        "password": "temp_pass_abc123"
+                    }
+                ],
+                "total_processed": 5
+            }
+        }
+
+
+# ========== Interview Invitation DTO ==========
+
+class InviteCandidatesDTO(BaseModel):
+    """DTO для приглашения кандидатов на собеседование"""
+    candidate_ids: List[int] = Field(..., description="Список ID кандидатов")
+    vacancy_id: int = Field(..., description="ID вакансии")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "candidate_ids": [10, 11, 12],
+                "vacancy_id": 1
+            }
+        }
+
+
+class InvitationResponseDTO(BaseModel):
+    """DTO для ответа после отправки приглашений"""
+    message: str
+    total_invited: int
+    successful_invites: int
+    failed_invites: int
+    failed_emails: List[str]
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "Приглашения отправлены",
+                "total_invited": 5,
+                "successful_invites": 5,
+                "failed_invites": 0,
+                "failed_emails": []
+            }
+        }
+
+
+# ========== Interview Completion DTO ==========
+
+class InterviewAnswersDTO(BaseModel):
+    """DTO для отправки ответов на интервью"""
+    vacancy_id: int = Field(..., description="ID вакансии")
+    text_answers: str = Field(..., description="Текстовые ответы кандидата")
+    # video_base64 будет передаваться через multipart/form-data
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "vacancy_id": 1,
+                "text_answers": "Ответ на вопрос 1: ...\nОтвет на вопрос 2: ..."
+            }
+        }
+
+
+class InterviewResultDTO(BaseModel):
+    """DTO для результата интервью"""
+    interview1_id: int
+    soft_skills_score: int
+    confidence_score: int
+    message: str
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "interview1_id": 15,
+                "soft_skills_score": 85,
+                "confidence_score": 78,
+                "message": "Интервью успешно завершено и оценено"
+            }
+        }
+
+
+# ========== Vacancy with Questions DTO ==========
+
+class VacancyWithQuestionsDTO(BaseModel):
+    """DTO для вакансии с вопросами"""
+    position_title: str
+    job_description: Optional[str]
+    requirements: Optional[str]
+    questions: Optional[List[str]]
+    
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "position_title": "Python Developer",
+                "job_description": "Разработка backend",
+                "requirements": "Python 3.9+, FastAPI",
+                "questions": [
+                    "Какой стек вы планируете изучать?",
+                    "Ваш коллега не вовремя закончил проект, ваши действия?"
+                ],
+            }
+        }

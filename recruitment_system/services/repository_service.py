@@ -147,6 +147,7 @@ class RecruitmentService:
         position_title: str,
         job_description: Optional[str] = None,
         requirements: Optional[str] = None,
+        questions: Optional[str] = None,
         status: VacancyStatus = VacancyStatus.OPEN
     ) -> Vacancy:
         """Создание вакансии"""
@@ -157,6 +158,7 @@ class RecruitmentService:
                 position_title=position_title,
                 job_description=job_description,
                 requirements=requirements,
+                questions = questions,
                 status=status
             )
             session.add(vacancy)

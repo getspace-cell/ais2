@@ -1,7 +1,9 @@
+# Database
 sqlalchemy==2.0.23
 pymysql==1.1.0
 cryptography==41.0.7
 
+# FastAPI
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 pydantic==2.5.0
@@ -10,3 +12,21 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.6
 pydantic-settings==2.1.0
+
+# HTTP клиент для API запросов
+httpx==0.25.2
+
+# Работа с файлами
+python-magic==0.4.27
+
+# Email
+aiosmtplib==3.0.1
+
+# Дополнительные зависимости
+python-dotenv==1.0.0
+
+pdfplumber==0.11.8
+
+openai-whisper==20230314
+
+mlx-whisper>=0.4.0 #для apple silicon

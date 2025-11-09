@@ -6,7 +6,7 @@
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Text, Date, DateTime,
-    Float, ForeignKey, Enum as SQLEnum
+    Float, ForeignKey, Enum as SQLEnum, JSON
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -142,6 +142,7 @@ class Vacancy(Base):
     position_title = Column(String(100), nullable=False)
     job_description = Column(Text)
     requirements = Column(Text)
+    questions = Column(JSON, nullable=True, comment="Список вопросов для собеседования")
     status = Column(SQLEnum(VacancyStatus), default=VacancyStatus.OPEN)
     
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -174,6 +175,8 @@ class InterviewStage1(Base):
     interview_date = Column(DateTime, nullable=False)
     questions = Column(Text, comment="Вопросы заданные на собеседовании")
     candidate_answers = Column(Text, comment="Ответы кандидата")
+    video_path = Column(String(500), comment="Путь к видео файлу")
+    audio_path = Column(String(500), comment="Путь к аудио файлу")
     soft_skills_score = Column(Integer, comment="Оценка soft skills 0-100")
     confidence_score = Column(Integer, comment="Оценка уверенности 0-100")
     
