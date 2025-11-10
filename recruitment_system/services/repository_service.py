@@ -369,3 +369,95 @@ class RecruitmentService:
             ).all()
         finally:
             session.close()
+    
+    def create_interview_stage1_invitation(
+        self,
+        candidate_id: int,
+        hr_id: int,
+        vacancy_id: int
+    ) -> InterviewStage1:
+        """
+        Создание записи интервью при приглашении кандидата.
+        Заполняются только обязательные поля (candidate_id, hr_id, vacancy_id).
+        Остальные поля заполнятся при прохождении интервью.
+        """
+        session = self.db.get_session()
+        try:
+            interview = InterviewStage1(
+                candidate_id=candidate_id,
+                hr_id=hr_id,
+                vacancy_id=vacancy_id,
+                # Остальные поля остаются NULL до прохождения интервью
+            )
+            session.add(interview)
+            session.commit()
+            session.refresh(interview)
+            return interview
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
+
+    def get_pending_interview(
+        self,
+        candidate_id: int,
+        vacancy_id: int
+    ) -> Optional[InterviewStage1]:
+        """
+        Получение незавершенного интервью кандидата.
+        Незавершенное = когда interview_date = NULL (еще не прошел интервью).
+        """
+        session = self.db.get_session()
+        try:
+            return session.query(InterviewStage1).filter(
+                InterviewStage1.candidate_id == candidate_id,
+                InterviewStage1.vacancy_id == vacancy_id,
+                InterviewStage1.interview_date == None  # Незавершенное интервью
+            ).first()
+        finally:
+            session.close()
+
+
+    def update_interview_stage1_completion(
+        self,
+        interview1_id: int,
+        interview_date: datetime,
+        questions: str,
+        candidate_answers: str,
+        video_path: str,
+        audio_path: str,
+        soft_skills_score: int,
+        confidence_score: int
+    ) -> InterviewStage1:
+        """
+        Обновление записи интервью после прохождения кандидатом.
+        Заполняются все оставшиеся поля.
+        """
+        session = self.db.get_session()
+        try:
+            interview = session.query(InterviewStage1).filter(
+                InterviewStage1.interview1_id == interview1_id
+            ).first()
+            
+            if not interview:
+                raise ValueError(f"Интервью с ID {interview1_id} не найдено")
+            
+            # Обновляем поля
+            interview.interview_date = interview_date
+            interview.questions = questions
+            interview.candidate_answers = candidate_answers
+            interview.video_path = video_path
+            interview.audio_path = audio_path
+            interview.soft_skills_score = soft_skills_score
+            interview.confidence_score = confidence_score
+            
+            session.commit()
+            session.refresh(interview)
+            return interview
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()

@@ -333,6 +333,8 @@ class InvitationResponseDTO(BaseModel):
     successful_invites: int
     failed_invites: int
     failed_emails: List[str]
+    created_interviews: int = Field(..., description="Количество созданных записей интервью")
+    interview_ids: List[int] = Field(..., description="ID созданных интервью")
     
     class Config:
         json_schema_extra = {
@@ -341,7 +343,9 @@ class InvitationResponseDTO(BaseModel):
                 "total_invited": 5,
                 "successful_invites": 5,
                 "failed_invites": 0,
-                "failed_emails": []
+                "failed_emails": [],
+                "created_interviews": 5,
+                "interview_ids": [1, 2, 3, 4, 5]
             }
         }
 

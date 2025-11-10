@@ -172,13 +172,14 @@ class InterviewStage1(Base):
     hr_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
     vacancy_id = Column(Integer, ForeignKey('vacancies.vacancy_id'), nullable=False)
     
-    interview_date = Column(DateTime, nullable=False)
-    questions = Column(Text, comment="Вопросы заданные на собеседовании")
-    candidate_answers = Column(Text, comment="Ответы кандидата")
-    video_path = Column(String(500), comment="Путь к видео файлу")
-    audio_path = Column(String(500), comment="Путь к аудио файлу")
-    soft_skills_score = Column(Integer, comment="Оценка soft skills 0-100")
-    confidence_score = Column(Integer, comment="Оценка уверенности 0-100")
+    # Эти поля теперь необязательные (nullable=True), заполняются при submit_interview
+    interview_date = Column(DateTime, nullable=True)  # Изменено на nullable=True
+    questions = Column(Text, nullable=True, comment="Вопросы заданные на собеседовании")
+    candidate_answers = Column(Text, nullable=True, comment="Ответы кандидата")
+    video_path = Column(String(500), nullable=True, comment="Путь к видео файлу")
+    audio_path = Column(String(500), nullable=True, comment="Путь к аудио файлу")
+    soft_skills_score = Column(Integer, nullable=True, comment="Оценка soft skills 0-100")
+    confidence_score = Column(Integer, nullable=True, comment="Оценка уверенности 0-100")
     
     created_at = Column(DateTime, default=datetime.utcnow)
 

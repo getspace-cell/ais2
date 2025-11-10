@@ -734,7 +734,6 @@ async def upload_resumes_zip(
 
 
 # ========== ПРИГЛАШЕНИЕ НА СОБЕСЕДОВАНИЕ ==========
-
 @router.post('/interview/invite',
             summary="Приглашение кандидатов на собеседование",
             description="Отправка email приглашений выбранным кандидатам (только для HR)")
@@ -747,8 +746,9 @@ async def invite_candidates(
     """
     Отправка приглашений кандидатам:
     1. Проверка прав HR
-    2. Получение данных кандидатов
-    3. Отправка email с логином/паролем
+    2. Создание записей InterviewStage1 для каждого кандидата
+    3. Получение данных кандидатов
+    4. Отправка email с логином/паролем
     """
     # Проверяем вакансию
     vacancy = service.get_vacancy_by_id(vacancy_id)
@@ -761,9 +761,10 @@ async def invite_candidates(
             detail="Вы можете приглашать кандидатов только на свои вакансии"
         )
     
-    # Формируем приглашения
+    # Формируем приглашения и создаем записи интервью
     invitations = []
-    base_url = "http://localhost:8000"  # Загружать из настроек
+    base_url = settings.BASE_URL
+    created_interviews = []
     
     for candidate_id in candidate_ids:
         candidate = service.get_user_by_id(candidate_id)
@@ -774,12 +775,31 @@ async def invite_candidates(
         if not resume:
             continue
         
+        # Проверяем, нет ли уже незавершенного интервью для этого кандидата
+        existing_interview = service.get_pending_interview(candidate_id, vacancy_id)
+        
+        if not existing_interview:
+            # Создаем запись в InterviewStage1 (только обязательные поля)
+            try:
+                interview = service.create_interview_stage1_invitation(
+                    candidate_id=candidate_id,
+                    hr_id=current_user.user_id,
+                    vacancy_id=vacancy_id
+                )
+                created_interviews.append(interview.interview1_id)
+                print(f"Создана запись интервью ID={interview.interview1_id} для кандидата {candidate_id}")
+            except Exception as e:
+                print(f"Ошибка создания интервью для кандидата {candidate_id}: {e}")
+                continue
+        else:
+            print(f"Для кандидата {candidate_id} уже существует незавершенное интервью")
+        
         invitations.append({
             'email': candidate.email,
             'full_name': candidate.full_name,
             'position_title': vacancy.position_title,
             'vacancy_link': f"{base_url}/vacancies/{vacancy_id}/interview",
-            'login': candidate.email,
+            'login': candidate.login,
             'password': "Пароль был отправлен при регистрации"
         })
     
@@ -791,9 +811,10 @@ async def invite_candidates(
         "total_invited": result['total'],
         "successful_invites": result['success'],
         "failed_invites": result['failed'],
-        "failed_emails": result['failed_emails']
+        "failed_emails": result['failed_emails'],
+        "created_interviews": len(created_interviews),
+        "interview_ids": created_interviews
     }
-
 
 # ========== ПРОХОЖДЕНИЕ ИНТЕРВЬЮ КАНДИДАТОМ ==========
 
@@ -820,7 +841,6 @@ async def get_interview_questions(
         "questions": vacancy.questions or []
     }
 
-
 @router.post('/vacancies/{vacancy_id}/submit_interview',
             summary="Отправка ответов на интервью",
             description="Кандидат отправляет видео и текстовые ответы на вопросы")
@@ -833,11 +853,12 @@ async def submit_interview_answers(
 ):
     """
     Обработка интервью:
-    1. Сохранение видео
-    2. Конвертация MP4 → MP3
-    3. Speech-to-Text
-    4. Анализ через DeepSeek
-    5. Сохранение оценок
+    1. Проверка существования незавершенного интервью
+    2. Сохранение видео
+    3. Конвертация MP4 → MP3
+    4. Speech-to-Text
+    5. Анализ через DeepSeek
+    6. Обновление записи InterviewStage1
     """
     vacancy = service.get_vacancy_by_id(vacancy_id)
     if not vacancy:
@@ -849,12 +870,19 @@ async def submit_interview_answers(
             detail="Для этой вакансии не определены вопросы"
         )
     
+    # Ищем незавершенное интервью для этого кандидата
+    pending_interview = service.get_pending_interview(current_user.user_id, vacancy_id)
+    
+    if not pending_interview:
+        raise HTTPException(
+            status_code=404,
+            detail="Вы не были приглашены на это интервью или уже прошли его"
+        )
+    
     try:
         # Читаем видео
         video_bytes = await video_file.read()
-        print(video_bytes,
-            current_user.user_id,
-            vacancy_id)
+        print(f"Получено видео от кандидата {current_user.user_id} для вакансии {vacancy_id}")
         
         # Обрабатываем видео (сохранение, конвертация, транскрибация)
         video_path, audio_path, transcribed_text = await process_interview_video(
@@ -873,38 +901,31 @@ async def submit_interview_answers(
             position_title=vacancy.position_title
         )
         
-        # Создаем запись интервью
-        interview = service.create_interview_stage1(
-            candidate_id=current_user.user_id,
-            hr_id=vacancy.hr_id,
-            vacancy_id=vacancy_id,
+        # Обновляем существующую запись интервью
+        updated_interview = service.update_interview_stage1_completion(
+            interview1_id=pending_interview.interview1_id,
             interview_date=datetime.now(),
             questions="\n".join([f"{i+1}. {q}" for i, q in enumerate(vacancy.questions)]),
             candidate_answers=combined_answers,
+            video_path=video_path,
+            audio_path=audio_path,
             soft_skills_score=soft_skills_score,
             confidence_score=confidence_score
         )
         
-        # Обновляем пути к файлам
-        session = service.db.get_session()
-        try:
-            db_interview = session.query(InterviewStage1).filter(
-                InterviewStage1.interview1_id == interview.interview1_id
-            ).first()
-            db_interview.video_path = video_path
-            db_interview.audio_path = audio_path
-            session.commit()
-        finally:
-            session.close()
+        print(f"Интервью {updated_interview.interview1_id} успешно завершено")
         
         return {
-            "interview1_id": interview.interview1_id,
+            "interview1_id": updated_interview.interview1_id,
             "soft_skills_score": soft_skills_score,
             "confidence_score": confidence_score,
             "message": "Интервью успешно завершено и оценено"
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Ошибка при обработке интервью: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Ошибка при обработке интервью: {str(e)}"
