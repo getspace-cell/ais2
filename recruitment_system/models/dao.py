@@ -132,7 +132,7 @@ class Resume(Base):
 class Vacancy(Base):
     """
     Вакансия, созданная HR-менеджером.
-    Содержит вопросы для собеседования.
+    Содержит вопросы для собеседования и список прикрепленных кандидатов.
     """
     __tablename__ = 'vacancies'
 
@@ -143,6 +143,7 @@ class Vacancy(Base):
     job_description = Column(Text)
     requirements = Column(Text)
     questions = Column(JSON, nullable=True, comment="Список вопросов для собеседования")
+    candidate_ids = Column(JSON, nullable=True, default=list, comment="Список ID кандидатов, прикрепленных к вакансии")
     status = Column(SQLEnum(VacancyStatus), default=VacancyStatus.OPEN)
     
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -155,7 +156,6 @@ class Vacancy(Base):
 
     def __repr__(self) -> str:
         return f"<Vacancy(id={self.vacancy_id}, title='{self.position_title}', status='{self.status.value}')>"
-
 
 # ============================================================================
 # СОБЕСЕДОВАНИЯ

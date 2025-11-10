@@ -461,3 +461,55 @@ class RecruitmentService:
             raise e
         finally:
             session.close()
+    def add_candidate_to_vacancy(self, vacancy_id: int, candidate_id: int) -> bool:
+        """
+        Добавление кандидата к вакансии.
+        Проверяет, не добавлен ли уже кандидат.
+        """
+        session = self.db.get_session()
+        try:
+            vacancy = session.query(Vacancy).filter(
+                Vacancy.vacancy_id == vacancy_id
+            ).first()
+            
+            if not vacancy:
+                raise ValueError(f"Вакансия с ID {vacancy_id} не найдена")
+            
+            # Инициализируем список, если его нет
+            if vacancy.candidate_ids is None:
+                vacancy.candidate_ids = []
+            
+            # Проверяем, не добавлен ли уже кандидат
+            if candidate_id not in vacancy.candidate_ids:
+                vacancy.candidate_ids = vacancy.candidate_ids + [candidate_id]
+                session.commit()
+                return True
+            
+            return False  # Кандидат уже был добавлен
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
+
+    def get_vacancy_candidates(self, vacancy_id: int) -> List[User]:
+        """
+        Получение списка кандидатов, прикрепленных к вакансии.
+        """
+        session = self.db.get_session()
+        try:
+            vacancy = session.query(Vacancy).filter(
+                Vacancy.vacancy_id == vacancy_id
+            ).first()
+            
+            if not vacancy or not vacancy.candidate_ids:
+                return []
+            
+            candidates = session.query(User).filter(
+                User.user_id.in_(vacancy.candidate_ids)
+            ).all()
+            
+            return candidates
+        finally:
+            session.close()

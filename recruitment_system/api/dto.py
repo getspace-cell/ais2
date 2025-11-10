@@ -134,12 +134,12 @@ class VacancyResponseDTO(BaseModel):
     job_description: Optional[str]
     requirements: Optional[str]
     questions: Optional[list]
+    candidate_ids: Optional[list] = Field(None, description="Список ID прикрепленных кандидатов")
     status: str
     created_at: datetime
     
     class Config:
         from_attributes = True
-
 
 # ========== Resume DTO ==========
 
@@ -289,23 +289,39 @@ from typing import List, Optional
 class UploadResumesResponseDTO(BaseModel):
     """DTO для ответа после загрузки резюме"""
     message: str
-    created_candidates: List[dict] = Field(..., description="Список созданных кандидатов")
+    created_candidates: List[dict] = Field(..., description="Список созданных/найденных кандидатов")
     total_processed: int
+    new_users: int = Field(..., description="Количество новых пользователей")
+    existing_users: int = Field(..., description="Количество существующих пользователей")
+    errors: int = Field(..., description="Количество ошибок")
+    error_details: Optional[List[dict]] = Field(None, description="Детали ошибок")
     
     class Config:
         json_schema_extra = {
             "example": {
-                "message": "Резюме успешно обработаны",
+                "message": "Успешно обработано 5 резюме",
                 "created_candidates": [
                     {
                         "user_id": 10,
                         "full_name": "Иван Иванов",
                         "email": "ivan@email.com",
                         "login": "candidate_10",
-                        "password": "temp_pass_abc123"
+                        "password": "temp_pass_abc123",
+                        "status": "new"
+                    },
+                    {
+                        "user_id": 7,
+                        "full_name": "Петр Петров",
+                        "email": "petr@email.com",
+                        "login": "existing_candidate",
+                        "status": "existing"
                     }
                 ],
-                "total_processed": 5
+                "total_processed": 5,
+                "new_users": 4,
+                "existing_users": 1,
+                "errors": 0,
+                "error_details": None
             }
         }
 
@@ -348,6 +364,7 @@ class InvitationResponseDTO(BaseModel):
                 "interview_ids": [1, 2, 3, 4, 5]
             }
         }
+
 
 
 # ========== Interview Completion DTO ==========
@@ -405,5 +422,28 @@ class VacancyWithQuestionsDTO(BaseModel):
                     "Какой стек вы планируете изучать?",
                     "Ваш коллега не вовремя закончил проект, ваши действия?"
                 ],
+            }
+        }
+        
+class VacancyCandidatesStatsDTO(BaseModel):
+    """DTO для статистики по кандидатам вакансии"""
+    vacancy_id: int
+    position_title: str
+    total_candidates: int = Field(..., description="Всего кандидатов прикреплено")
+    invited_candidates: int = Field(..., description="Приглашено на интервью")
+    completed_interviews: int = Field(..., description="Завершили интервью")
+    pending_interviews: int = Field(..., description="Ожидают прохождения интервью")
+    not_invited_yet: int = Field(..., description="Еще не приглашены")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "vacancy_id": 1,
+                "position_title": "Python Developer",
+                "total_candidates": 10,
+                "invited_candidates": 7,
+                "completed_interviews": 5,
+                "pending_interviews": 2,
+                "not_invited_yet": 3
             }
         }
