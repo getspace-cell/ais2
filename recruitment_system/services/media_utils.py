@@ -135,7 +135,7 @@ async def transcribe_audio_to_text(audio_path: str) -> str:
     import mlx_whisper 
 
     try:
-        text = mlx_whisper.transcribe(audio_path, path_or_hf_repo="mlx-community/whisper-large-v3-turbo")["text"]
+        text = mlx_whisper.transcribe(audio_path, path_or_hf_repo="mlx-community/whisper-large-v3-turbo", language="ru")["text"]
         print(text)
 
         # В result хранится dict с ключом "text"
@@ -161,7 +161,7 @@ async def process_interview_video(video_bytes: bytes, candidate_id: int, vacancy
     media_dir = Path("media/interviews")
     media_dir.mkdir(parents=True, exist_ok=True)
     
-    video_filename = f"interview_c{candidate_id}_v{vacancy_id}.mp4"
+    video_filename = f"interview_c{candidate_id}_v{vacancy_id}.webm"
     audio_filename = f"interview_c{candidate_id}_v{vacancy_id}.mp3"
     
     video_path = str(media_dir / video_filename)

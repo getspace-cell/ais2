@@ -4,6 +4,10 @@ from fastapi.responses import RedirectResponse
 from fastapi.openapi.utils import get_openapi
 from api.routes import router
 from config import settings
+from fastapi.staticfiles import StaticFiles
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = FastAPI(
     title="Simple HR - Recruitment System API",
@@ -144,6 +148,9 @@ async def health_check():
         "version": settings.VERSION,
         "database": "connected"
     }
+
+app.mount("/videos", StaticFiles(directory=os.path.join(BASE_DIR, "media/interviews")), name="videos")
+
 
 
 if __name__ == "__main__":

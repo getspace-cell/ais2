@@ -915,7 +915,7 @@ async def get_interview_questions(
             description="Кандидат отправляет видео и текстовые ответы на вопросы")
 async def submit_interview_answers(
     vacancy_id: int,
-    video_file: UploadFile = File(..., description="Видео файл с ответами (.mp4)"),
+    video_file: UploadFile = File(..., description="Видео файл с ответами (.webm)"),
     text_answers: str = Form(..., description="Текстовые ответы на вопросы"),
     current_user: User = Depends(get_current_candidate),
     service: RecruitmentService = Depends(get_service)
@@ -924,7 +924,7 @@ async def submit_interview_answers(
     Обработка интервью:
     1. Проверка существования незавершенного интервью
     2. Сохранение видео
-    3. Конвертация MP4 → MP3
+    3. Конвертация webm → MP3
     4. Speech-to-Text
     5. Анализ через DeepSeek
     6. Обновление записи InterviewStage1

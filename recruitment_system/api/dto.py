@@ -210,9 +210,12 @@ class InterviewStage1ResponseDTO(BaseModel):
     candidate_id: int
     hr_id: int
     vacancy_id: int
-    interview_date: datetime
+    interview_date: Optional[datetime]
     soft_skills_score: Optional[int]
     confidence_score: Optional[int]
+    candidate_answers : Optional[str]
+    video_path : Optional[str]
+    audio_path: Optional[str]
     created_at: datetime
     
     class Config:
