@@ -30,3 +30,8 @@ pdfplumber==0.11.8
 openai-whisper==20230314
 
 mlx-whisper>=0.4.0 #для apple silicon
+
+#ai utils
+torch
+librosa
+transformers 

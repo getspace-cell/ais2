@@ -25,6 +25,7 @@ from repository import DatabaseRepository
 from services.repository_service import RecruitmentService
 from services.ai_utils import parse_resumes_with_deepseek, analyze_interview_answers
 from services.media_utils import process_interview_video
+from services.email_utils import mass_reg_info
 from services.email_utils import send_bulk_invitations
 from models.dao import User, UserRole, Vacancy, InterviewStage1
 from api.auth_utils import get_current_hr, get_current_candidate, get_password_hash
@@ -781,7 +782,7 @@ async def upload_resumes_zip(
         
         # Объединяем списки для ответа
         all_candidates = created_candidates + existing_candidates
-        
+        invic = mass_reg_info(created_candidates)
         return {
             "message": f"Успешно обработано {len(all_candidates)} резюме",
             "created_candidates": all_candidates,

@@ -120,6 +120,7 @@ async def transcribe_audio_to_text(audio_path: str) -> str:
         logger.error(f"Ошибка при транскрибации аудио: {e}")
         raise
 '''
+'''
 async def transcribe_audio_to_text(audio_path: str) -> str:
     """
     Преобразование аудио в текст с использованием Whisper API
@@ -140,6 +141,65 @@ async def transcribe_audio_to_text(audio_path: str) -> str:
 
         # В result хранится dict с ключом "text"
         return text
+        
+    except Exception as e:
+        logger.error(f"Ошибка при транскрибации аудио: {e}")
+        raise
+    '''
+#дообученная
+async def transcribe_audio_to_text(audio_path: str) -> str:
+    """
+    Преобразование аудио в текст с использованием вашей модели на Hugging Face
+    """
+    import asyncio
+    import logging
+    import torch
+    import librosa
+    import numpy as np
+    from transformers import WhisperProcessor, WhisperForConditionalGeneration
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        MODEL_DIR = "/Users/ruslan/Desktop/univer/ro/tuned_models/final_model_tinyv2"
+
+        processor = WhisperProcessor.from_pretrained(MODEL_DIR, local_files_only=True)
+        model = WhisperForConditionalGeneration.from_pretrained(MODEL_DIR, local_files_only=True).to(device)
+
+        audio_array, sr = librosa.load(audio_path, sr=16000, mono=True)
+        
+        segment_length = 30 * 16000 
+        segments = []
+        
+        for start in range(0, len(audio_array), segment_length):
+            end = start + segment_length
+            segment = audio_array[start:end]
+            segments.append(segment)
+        
+        all_texts = []
+        
+        for i, segment in enumerate(segments):
+            print(f"Обрабатываю сегмент {i+1}/{len(segments)}")
+            
+            inputs = processor.feature_extractor(
+                segment, sampling_rate=16000, return_tensors="pt"
+            ).input_features.to(device)
+
+            with torch.no_grad():
+                generated_ids = model.generate(
+                    inputs,
+                    language="ru",
+                    task="transcribe",
+                    forced_decoder_ids=processor.get_decoder_prompt_ids(language="ru", task="transcribe")
+                )
+
+            text = processor.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+            all_texts.append(text)
+        
+        full_text = " ".join(all_texts)
+        print(f"Полный текст: {full_text}")
+        return full_text
         
     except Exception as e:
         logger.error(f"Ошибка при транскрибации аудио: {e}")

@@ -137,5 +137,108 @@ def send_bulk_invitations(invitations: List[dict]) -> dict:
         "failed_emails": failed_emails
     }
 
+def send_reg_info(
+    to_email: str,
+    full_name: str,
+    login: str,
+    password: str
+) -> bool:
+    """
+    Отправка регистрационных данных
+    
+    Args:
+        to_email: Email кандидата
+        full_name: Полное имя кандидата
+        login: Логин для входа
+        password: Пароль для входа
+    
+    Returns:
+        True если отправка успешна
+    """
+    # Проверяем настройки SMTP
+    if not SMTP_USERNAME or not SMTP_PASSWORD:
+        logger.warning(f"SMTP не настроен. Email для {to_email} не отправлен (режим разработки)")
+        # В режиме разработки возвращаем True и логируем приглашение
+        logger.info(f"""
+=== ПРИГЛАШЕНИЕ НА СОБЕСЕДОВАНИЕ (DEV MODE) ===
+Кому: {to_email}
+Имя: {full_name}
+Login: {login}
+Password: {password}
+===============================================
+        """)
+        return True
+    
+    subject = f"Регистрационная информация сервиса Simple HR"
+    
+    body = f"""Здравствуйте, {full_name}.
+
+Рады сообщить, что вами заинтересовались и возможно скоро вас пригласят на работу))).
+
+Ваши регистрационные данные для авторизации на платформе:
+    • Login: {login}
+    • Password: {password}
+
+Если у вас возникнут вопросы, свяжитесь с нами.
+
+С уважением,
+Simple HR
+"""
+    
+    try:
+        # Создаем сообщение
+        message = MIMEMultipart()
+        message["From"] = FROM_EMAIL
+        message["To"] = to_email
+        message["Subject"] = subject
+        
+        message.attach(MIMEText(body, "plain", "utf-8"))
+        
+        # Отправляем через SMTP с таймаутом
+        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=10) as server:
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.send_message(message)
+        
+        logger.info(f"Приглашение отправлено на {to_email}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Ошибка при отправке email на {to_email}: {e}")
+        return False
+
+def mass_reg_info(reg_info: List[dict]) -> dict:
+    """
+    Массовая отправка приглашений
+    
+    Args:
+        reg_info: Список словарей с данными для отправки
+    
+    Returns:
+        Статистика отправки
+    """
+    success_count = 0
+    failed_emails = []
+    
+    for inv in reg_info:
+        success = send_reg_info(
+            to_email=inv['email'],
+            full_name=inv['full_name'],
+            login=inv['login'],
+            password=inv['password']
+        )
+        
+        if success:
+            success_count += 1
+        else:
+            failed_emails.append(inv['email'])
+    
+    return {
+        "total": len(reg_info),
+        "success": success_count,
+        "failed": len(failed_emails),
+        "failed_emails": failed_emails
+    }
+
+
 
 
