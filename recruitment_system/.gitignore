@@ -1,8 +1,46 @@
+# Environment variables
 .env
-.mp4
-.mp3
-.webm
-test.py
-venv/
+*.env
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Python cache
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Media files
+*.mp4
+*.mov
+*.avi
+*.mp3
+*.wav
+
+# Test files
+test.py
+locust_test.py
+
+# Temporary files
+*.tmp
+*.temp
