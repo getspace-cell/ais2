@@ -36,6 +36,7 @@ Thumbs.db
 *.avi
 *.mp3
 *.wav
+*.webm
 
 # Test files
 test.py

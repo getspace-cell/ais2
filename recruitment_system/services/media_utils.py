@@ -10,9 +10,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Для Speech-to-Text можно использовать OpenAI Whisper или другой сервис
-WHISPER_API_URL = "https://api.openai.com/v1/audio/transcriptions"
-WHISPER_API_KEY = "your-openai-api-key"  # Загружать из .env
+
 
 
 def convert_video_to_audio(video_path: str, output_audio_path: str) -> bool:
