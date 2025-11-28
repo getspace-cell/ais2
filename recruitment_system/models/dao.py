@@ -48,8 +48,9 @@ class User(Base):
     role = Column(SQLEnum(UserRole), nullable=False)
     registration_date = Column(DateTime, default=datetime.utcnow)
     
-    # Отношения
+    # Отношения - используем строки для forward reference
     resume = relationship("Resume", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    hr_company_info = relationship("HRCompanyInfo", back_populates="hr", uselist=False, cascade="all, delete-orphan")
     vacancies = relationship("Vacancy", back_populates="hr", cascade="all, delete-orphan")
     interviews_stage1_as_candidate = relationship(
         "InterviewStage1", 
@@ -90,6 +91,45 @@ class User(Base):
 
     def __repr__(self) -> str:
         return f"<User(id={self.user_id}, login='{self.login}', role='{self.role.value}')>"
+
+
+# ============================================================================
+# ИНФОРМАЦИЯ О КОМПАНИИ HR
+# ============================================================================
+
+class HRCompanyInfo(Base):
+    """
+    Дополнительная информация о HR и его компании.
+    Связана один-к-одному с User (где role=HR).
+    """
+    __tablename__ = 'hr_company_info'
+
+    info_id = Column(Integer, primary_key=True, autoincrement=True)
+    hr_id = Column(Integer, ForeignKey('users.user_id'), unique=True, nullable=False)
+    
+    # Информация о позиции HR
+    position = Column(String(100), comment="Должность HR в компании")
+    department = Column(String(100), comment="Отдел")
+    
+    # Информация о компании
+    company_name = Column(String(200), nullable=False, comment="Название компании")
+    company_description = Column(Text, comment="Описание компании")
+    company_website = Column(String(200), comment="Веб-сайт компании")
+    company_size = Column(Integer, comment="Количество сотрудников")
+    industry = Column(String(100), comment="Отрасль")
+    
+    # Контактная информация
+    office_address = Column(Text, comment="Адрес офиса")
+    contact_phone = Column(String(20), comment="Контактный телефон")
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Отношения
+    hr = relationship("User", back_populates="hr_company_info")
+
+    def __repr__(self) -> str:
+        return f"<HRCompanyInfo(id={self.info_id}, hr_id={self.hr_id}, company='{self.company_name}')>"
 
 
 # ============================================================================
@@ -173,7 +213,7 @@ class InterviewStage1(Base):
     vacancy_id = Column(Integer, ForeignKey('vacancies.vacancy_id'), nullable=False)
     
     # Эти поля теперь необязательные (nullable=True), заполняются при submit_interview
-    interview_date = Column(DateTime, nullable=True)  # Изменено на nullable=True
+    interview_date = Column(DateTime, nullable=True)
     questions = Column(Text, nullable=True, comment="Вопросы заданные на собеседовании")
     candidate_answers = Column(Text, nullable=True, comment="Ответы кандидата")
     video_path = Column(String(500), nullable=True, comment="Путь к видео файлу")

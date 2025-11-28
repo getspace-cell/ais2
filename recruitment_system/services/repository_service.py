@@ -2,7 +2,7 @@ from typing import List, Optional
 from datetime import datetime, date
 from models.dao import (
     User, UserRole, Resume, Vacancy, VacancyStatus,
-    InterviewStage1, InterviewStage2, CandidateReport
+    InterviewStage1, InterviewStage2, CandidateReport, HRCompanyInfo
 )
 from repository import DatabaseRepository
 
@@ -88,6 +88,100 @@ class RecruitmentService:
             user = session.query(User).filter(User.user_id == user_id).first()
             if user:
                 session.delete(user)
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+        # ========== CRUD для HRCompanyInfo ==========
+    
+    def create_hr_company_info(
+        self,
+        hr_id: int,
+        company_name: str,
+        position: Optional[str] = None,
+        department: Optional[str] = None,
+        company_description: Optional[str] = None,
+        company_website: Optional[str] = None,
+        company_size: Optional[int] = None,
+        industry: Optional[str] = None,
+        office_address: Optional[str] = None,
+        contact_phone: Optional[str] = None
+    ) -> HRCompanyInfo:
+        """Создание информации о компании HR"""
+        session = self.db.get_session()
+        try:
+            hr_info = HRCompanyInfo(
+                hr_id=hr_id,
+                position=position,
+                department=department,
+                company_name=company_name,
+                company_description=company_description,
+                company_website=company_website,
+                company_size=company_size,
+                industry=industry,
+                office_address=office_address,
+                contact_phone=contact_phone
+            )
+            session.add(hr_info)
+            session.commit()
+            session.refresh(hr_info)
+            return hr_info
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+    
+    def get_hr_company_info_by_hr_id(self, hr_id: int) -> Optional[HRCompanyInfo]:
+        """Получение информации о компании по HR ID"""
+        session = self.db.get_session()
+        try:
+            return session.query(HRCompanyInfo).filter(
+                HRCompanyInfo.hr_id == hr_id
+            ).first()
+        finally:
+            session.close()
+    
+    def update_hr_company_info(self, hr_id: int, update_data: dict) -> Optional[HRCompanyInfo]:
+        """Обновление информации о компании HR"""
+        session = self.db.get_session()
+        try:
+            hr_info = session.query(HRCompanyInfo).filter(
+                HRCompanyInfo.hr_id == hr_id
+            ).first()
+            
+            if not hr_info:
+                return None
+            
+            for key, value in update_data.items():
+                if value is not None:
+                    setattr(hr_info, key, value)
+            
+            hr_info.updated_at = datetime.utcnow()
+            
+            session.commit()
+            session.refresh(hr_info)
+            return hr_info
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+    
+    def delete_hr_company_info(self, hr_id: int) -> bool:
+        """Удаление информации о компании HR"""
+        session = self.db.get_session()
+        try:
+            hr_info = session.query(HRCompanyInfo).filter(
+                HRCompanyInfo.hr_id == hr_id
+            ).first()
+            
+            if hr_info:
+                session.delete(hr_info)
                 session.commit()
                 return True
             return False

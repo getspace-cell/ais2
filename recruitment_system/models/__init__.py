@@ -9,6 +9,7 @@ from .dao import (
     InterviewStage1,
     InterviewStage2,
     CandidateReport,
+    HRCompanyInfo
 )
 
 __all__ = [
@@ -20,7 +21,8 @@ __all__ = [
     'Vacancy',
     'InterviewStage1',
     'InterviewStage2',
-    'CandidateReport'
+    'CandidateReport',
+    'HRCompanyInfo'
 ]
 
 __version__ = '1.0.0'

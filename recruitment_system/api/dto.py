@@ -99,6 +99,84 @@ class UserProfileDTO(BaseModel):
     class Config:
         from_attributes = True
 
+# ========== HR Company Info DTO ==========
+
+class HRCompanyInfoCreateDTO(BaseModel):
+    """DTO для создания информации о компании HR"""
+    position: Optional[str] = Field(None, max_length=100, description="Должность HR")
+    department: Optional[str] = Field(None, max_length=100, description="Отдел")
+    company_name: str = Field(..., min_length=2, max_length=200, description="Название компании")
+    company_description: Optional[str] = Field(None, description="Описание компании")
+    company_website: Optional[str] = Field(None, max_length=200, description="Веб-сайт компании")
+    company_size: Optional[int] = Field(None, ge=1, description="Количество сотрудников")
+    industry: Optional[str] = Field(None, max_length=100, description="Отрасль")
+    office_address: Optional[str] = Field(None, description="Адрес офиса")
+    contact_phone: Optional[str] = Field(None, max_length=20, description="Контактный телефон")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "position": "Senior HR Manager",
+                "department": "Отдел по работе с персоналом",
+                "company_name": "TechCorp Solutions",
+                "company_description": "Инновационная IT-компания, специализирующаяся на разработке корпоративных решений",
+                "company_website": "https://techcorp.com",
+                "company_size": 250,
+                "industry": "Информационные технологии",
+                "office_address": "Москва, ул. Тверская, д. 1",
+                "contact_phone": "+7-495-123-45-67"
+            }
+        }
+
+
+class HRCompanyInfoUpdateDTO(BaseModel):
+    """DTO для обновления информации о компании HR"""
+    position: Optional[str] = Field(None, max_length=100)
+    department: Optional[str] = Field(None, max_length=100)
+    company_name: Optional[str] = Field(None, min_length=2, max_length=200)
+    company_description: Optional[str] = None
+    company_website: Optional[str] = Field(None, max_length=200)
+    company_size: Optional[int] = Field(None, ge=1)
+    industry: Optional[str] = Field(None, max_length=100)
+    office_address: Optional[str] = None
+    contact_phone: Optional[str] = Field(None, max_length=20)
+
+
+class HRCompanyInfoResponseDTO(BaseModel):
+    """DTO для ответа с информацией о компании HR"""
+    info_id: int
+    hr_id: int
+    position: Optional[str]
+    department: Optional[str]
+    company_name: str
+    company_description: Optional[str]
+    company_website: Optional[str]
+    company_size: Optional[int]
+    industry: Optional[str]
+    office_address: Optional[str]
+    contact_phone: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "info_id": 1,
+                "hr_id": 5,
+                "position": "Senior HR Manager",
+                "department": "Отдел по работе с персоналом",
+                "company_name": "TechCorp Solutions",
+                "company_description": "Инновационная IT-компания",
+                "company_website": "https://techcorp.com",
+                "company_size": 250,
+                "industry": "Информационные технологии",
+                "office_address": "Москва, ул. Тверская, д. 1",
+                "contact_phone": "+7-495-123-45-67",
+                "created_at": "2024-01-15T10:30:00",
+                "updated_at": "2024-01-15T10:30:00"
+            }
+        }
 
 # ========== Vacancy DTO ==========
 

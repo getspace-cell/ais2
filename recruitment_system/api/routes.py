@@ -1082,3 +1082,160 @@ async def get_vacancy_candidates_stats(
         "pending_interviews": len(pending_interviews),
         "not_invited_yet": len(all_candidates) - len(invited_interviews)
     }
+
+# ========== HR COMPANY INFO ==========
+
+@router.post('/hr/company-info',
+            response_model=HRCompanyInfoResponseDTO,
+            status_code=status.HTTP_201_CREATED,
+            summary="Создание информации о компании",
+            description="Создание информации о компании HR (только для HR)")
+async def create_hr_company_info(
+    company_data: HRCompanyInfoCreateDTO,
+    current_user: User = Depends(get_current_hr),
+    service: RecruitmentService = Depends(get_service)
+):
+    """
+    Создание информации о компании для текущего HR.
+    
+    HR может создать только одну запись с информацией о компании.
+    """
+    # Проверяем, нет ли уже информации о компании
+    existing_info = service.get_hr_company_info_by_hr_id(current_user.user_id)
+    if existing_info:
+        raise HTTPException(
+            status_code=400,
+            detail="Информация о компании уже существует. Используйте метод PUT для обновления"
+        )
+    
+    try:
+        hr_info = service.create_hr_company_info(
+            hr_id=current_user.user_id,
+            position=company_data.position,
+            department=company_data.department,
+            company_name=company_data.company_name,
+            company_description=company_data.company_description,
+            company_website=company_data.company_website,
+            company_size=company_data.company_size,
+            industry=company_data.industry,
+            office_address=company_data.office_address,
+            contact_phone=company_data.contact_phone
+        )
+        return HRCompanyInfoResponseDTO.from_orm(hr_info)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get('/hr/company-info/my',
+            response_model=HRCompanyInfoResponseDTO,
+            summary="Получение своей информации о компании",
+            description="Получение информации о компании текущего HR")
+async def get_my_hr_company_info(
+    current_user: User = Depends(get_current_hr),
+    service: RecruitmentService = Depends(get_service)
+):
+    """Получение информации о компании текущего HR"""
+    hr_info = service.get_hr_company_info_by_hr_id(current_user.user_id)
+    if not hr_info:
+        raise HTTPException(
+            status_code=404,
+            detail="Информация о компании не найдена. Создайте её сначала"
+        )
+    return HRCompanyInfoResponseDTO.from_orm(hr_info)
+
+
+@router.get('/hr/company-info/{hr_id}',
+            response_model=HRCompanyInfoResponseDTO,
+            summary="Получение информации о компании HR по ID",
+            description="Доступно для всех авторизованных пользователей")
+async def get_hr_company_info(
+    hr_id: int,
+    current_user: User = Depends(get_current_user),
+    service: RecruitmentService = Depends(get_service)
+):
+    """
+    Получение информации о компании HR по ID.
+    
+    Может быть полезно кандидатам для просмотра информации о компании.
+    """
+    # Проверяем что пользователь с hr_id действительно HR
+    hr_user = service.get_user_by_id(hr_id)
+    if not hr_user or hr_user.role != UserRole.HR:
+        raise HTTPException(
+            status_code=404,
+            detail="HR с указанным ID не найден"
+        )
+    
+    hr_info = service.get_hr_company_info_by_hr_id(hr_id)
+    if not hr_info:
+        raise HTTPException(
+            status_code=404,
+            detail="Информация о компании для данного HR не найдена"
+        )
+    return HRCompanyInfoResponseDTO.from_orm(hr_info)
+
+
+@router.put('/hr/company-info/my',
+            response_model=HRCompanyInfoResponseDTO,
+            summary="Обновление своей информации о компании",
+            description="Обновление информации о компании текущего HR")
+async def update_my_hr_company_info(
+    company_data: HRCompanyInfoUpdateDTO,
+    current_user: User = Depends(get_current_hr),
+    service: RecruitmentService = Depends(get_service)
+):
+    """Обновление информации о компании текущего HR"""
+    hr_info = service.get_hr_company_info_by_hr_id(current_user.user_id)
+    if not hr_info:
+        raise HTTPException(
+            status_code=404,
+            detail="Информация о компании не найдена. Создайте её сначала через POST"
+        )
+    
+    try:
+        update_data = company_data.dict(exclude_unset=True)
+        updated_info = service.update_hr_company_info(current_user.user_id, update_data)
+        return HRCompanyInfoResponseDTO.from_orm(updated_info)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete('/hr/company-info/my',
+            response_model=MessageDTO,
+            summary="Удаление своей информации о компании",
+            description="Удаление информации о компании текущего HR")
+async def delete_my_hr_company_info(
+    current_user: User = Depends(get_current_hr),
+    service: RecruitmentService = Depends(get_service)
+):
+    """Удаление информации о компании текущего HR"""
+    result = service.delete_hr_company_info(current_user.user_id)
+    if not result:
+        raise HTTPException(
+            status_code=404,
+            detail="Информация о компании не найдена"
+        )
+    return MessageDTO(message="Информация о компании успешно удалена")
+
+
+@router.get('/companies',
+            response_model=List[HRCompanyInfoResponseDTO],
+            summary="Получение списка всех компаний",
+            description="Получение информации о всех компаниях (доступно всем)")
+async def get_all_companies(
+    current_user: User = Depends(get_current_user),
+    service: RecruitmentService = Depends(get_service)
+):
+    """
+    Получение списка всех компаний с HR.
+    
+    Может быть полезно кандидатам для просмотра доступных компаний.
+    """
+    from models.dao import HRCompanyInfo
+    
+    session = service.db.get_session()
+    try:
+        companies = session.query(HRCompanyInfo).all()
+        return [HRCompanyInfoResponseDTO.from_orm(c) for c in companies]
+    finally:
+        session.close()
