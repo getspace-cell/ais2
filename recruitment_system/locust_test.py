@@ -1,638 +1,429 @@
-"""
-Сценарии нагрузочного тестирования для Simple HR API
-Лабораторная работа №4 - ИСПРАВЛЕННАЯ ВЕРСИЯ
-"""
+
 
 from locust import HttpUser, task, between, tag
 import random
 import json
-import time
-from datetime import datetime
 
+HR_CREDENTIALS = {
+    "login": "hr_test",
+    "password": "test123"
+}
 
-# Тестовые данные с более уникальными идентификаторами
-def get_test_users():
-    timestamp = int(time.time())
-    random_suffix = random.randint(10000, 99999)
-    
-    return {
-        "hr": {
-            "login": f"hr_load_{timestamp}_{random_suffix}",
-            "password": "testpass123",
-            "email": f"hr_{timestamp}_{random_suffix}@test.com",
-            "full_name": f"Test HR Load {timestamp}",
-            "role": "HR"
-        },
-        "candidate": {
-            "login": f"candidate_load_{timestamp}_{random_suffix}",
-            "password": "testpass123", 
-            "email": f"candidate_{timestamp}_{random_suffix}@test.com",
-            "full_name": f"Test Candidate Load {timestamp}",
-            "role": "Кандидат"
-        }
-    }
+CANDIDATE_CREDENTIALS = {
+    "login": "candidate_test", 
+    "password": "test123"
+}
 
-VACANCY_TITLES = [
-    "Python Developer",
-    "Full-stack Developer", 
-    "Backend Developer",
-    "Frontend Developer",
-    "DevOps Engineer",
-    "Data Scientist",
-    "ML Engineer",
-    "QA Engineer",
-    "System Administrator",
-    "Product Manager"
-]
+VACANCY_DATA = {
+    "position_title": "Python Developer",
+    "job_description": "Разработка backend на FastAPI",
+    "requirements": "Python 3.9+, FastAPI, PostgreSQL",
+    "questions": ["Расскажите о себе", "Опыт работы с FastAPI?"]
+}
 
-VACANCY_DESCRIPTIONS = [
-    "Мы ищем опытного разработчика для работы над высоконагруженным проектом",
-    "Присоединяйтесь к нашей команде для разработки инновационных решений",
-    "Работа над интересными задачами в дружном коллективе",
-    "Возможность профессионального роста и реализации амбициозных проектов",
-    "Разработка и поддержка бизнес-критичных приложений"
-]
+RESUME_DATA = {
+    "birth_date": "1995-05-15",
+    "contact_phone": "+7-900-123-45-67",
+    "contact_email": "test@email.com",
+    "education": "МГУ, ВМК, 2017",
+    "work_experience": "5 лет Python",
+    "skills": "Python, FastAPI, PostgreSQL"
+}
 
 
 class SimpleHRUser(HttpUser):
     """
-    Улучшенный класс для нагрузочного тестирования Simple HR системы.
-    Решены проблемы с порядком выполнения операций и управлением состоянием.
+    Класс для эмуляции пользователя системы Simple HR.
+    Имитирует действия как HR, так и кандидатов.
     """
     
+    # Время ожидания между задачами (1-3 секунды)
     wait_time = between(1.0, 3.0)
     
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._reset_state()
-    
-    def _reset_state(self):
-        """Сброс состояния пользователя"""
-        self.hr_token = None
-        self.candidate_token = None
-        self.hr_user_id = None
-        self.candidate_user_id = None
-        self.my_vacancies = []  # Только вакансии этого пользователя
-        self.available_vacancies = []  # Все доступные вакансии
-        self.initialized = False
+    # Токены для авторизованных запросов
+    hr_token = None
+    candidate_token = None
     
     def on_start(self):
-        """Надежная инициализация пользователя"""
-        self._reset_state()
-        test_users = get_test_users()
+        """
+        Выполняется при запуске пользователя.
+        Регистрируем тестовых пользователей если их нет.
+        """
+        # Пытаемся войти как HR
+        self.login_as_hr()
         
-        # Регистрация HR с повторными попытками
-        if self._register_user(test_users["hr"], "hr"):
-            # Создаем минимум одну вакансию для HR
-            self._create_initial_vacancy()
-        
-        # Регистрация кандидата
-        self._register_user(test_users["candidate"], "candidate")
-        
-        self.initialized = self.hr_token or self.candidate_token
-        
-        if self.initialized:
-            # Предварительная загрузка доступных вакансий
-            self._refresh_available_vacancies()
+        # Пытаемся войти как кандидат
+        self.login_as_candidate()
     
-    def _register_user(self, user_data, user_type):
-        """Регистрация пользователя с обработкой ошибок"""
-        max_attempts = 2
-        for attempt in range(max_attempts):
-            try:
-                # Генерируем уникальные данные для каждой попытки
-                unique_suffix = f"{int(time.time())}_{random.randint(1000, 9999)}"
-                user_data_copy = user_data.copy()
-                user_data_copy["login"] = f"{user_data['login']}_{unique_suffix}"
-                user_data_copy["email"] = f"{user_data['email'].split('@')[0]}_{unique_suffix}@test.com"
-                
-                with self.client.post(
-                    "/api/v1/register",
-                    json=user_data_copy,
-                    catch_response=True,
-                    name=f"POST /api/v1/register ({user_type})"
-                ) as response:
-                    if response.status_code in [200, 201]:
-                        data = response.json()
-                        if user_type == "hr":
-                            self.hr_token = data["access_token"]
-                            self.hr_user_id = data["user_id"]
-                        else:
-                            self.candidate_token = data["access_token"] 
-                            self.candidate_user_id = data["user_id"]
-                        response.success()
-                        return True
-                    elif response.status_code == 400 and "уже существует" in response.text:
-                        # Пробуем войти вместо регистрации
-                        return self._login_user(user_data_copy, user_type)
-                    else:
-                        response.failure(f"{user_type} registration failed: {response.status_code}")
-                        if attempt == max_attempts - 1:
-                            return False
-            except Exception as e:
-                if attempt == max_attempts - 1:
-                    return False
-        return False
-    
-    def _login_user(self, user_data, user_type):
-        """Вход для существующего пользователя"""
-        login_data = {
-            "login": user_data["login"],
-            "password": user_data["password"]
-        }
-        
-        with self.client.post(
+    def login_as_hr(self):
+        """Вход в систему как HR"""
+        response = self.client.post(
             "/api/v1/login",
-            json=login_data,
+            json=HR_CREDENTIALS,
             catch_response=True,
-            name=f"POST /api/v1/login ({user_type})"
-        ) as response:
-            if response.status_code == 200:
-                data = response.json()
-                if user_type == "hr":
-                    self.hr_token = data["access_token"]
-                    self.hr_user_id = data["user_id"]
-                else:
-                    self.candidate_token = data["access_token"]
-                    self.candidate_user_id = data["user_id"]
-                response.success()
-                return True
-            else:
-                response.failure(f"{user_type} login failed: {response.status_code}")
-                return False
-    
-    def _create_initial_vacancy(self):
-        """Создание начальной вакансии для HR"""
-        if not self.hr_token:
-            return
-            
-        vacancy_data = {
-            "position_title": random.choice(VACANCY_TITLES),
-            "job_description": random.choice(VACANCY_DESCRIPTIONS),
-            "requirements": "Python 3.8+, опыт работы от 2 лет, знание SQL",
-            "questions": [
-                "Расскажите о вашем опыте работы с Python",
-                "Какие фреймворки вы использовали?",
-                "Почему хотите работать в нашей компании?"
-            ]
-        }
+            name="[AUTH] Login as HR"
+        )
         
-        with self.client.post(
-            "/api/v1/vacancies",
-            headers={"Authorization": f"Bearer {self.hr_token}"},
-            json=vacancy_data,
+        if response.status_code == 200:
+            data = response.json()
+            self.hr_token = data['access_token']
+            response.success()
+        elif response.status_code == 401:
+            # Пробуем зарегистрироваться
+            self.register_hr()
+        else:
+            response.failure(f"Login failed: {response.status_code}")
+    
+    def login_as_candidate(self):
+        """Вход в систему как кандидат"""
+        response = self.client.post(
+            "/api/v1/login",
+            json=CANDIDATE_CREDENTIALS,
             catch_response=True,
-            name="INITIAL: POST /api/v1/vacancies"
-        ) as response:
-            if response.status_code == 201:
-                data = response.json()
-                self.my_vacancies.append(data["vacancy_id"])
-                response.success()
+            name="[AUTH] Login as Candidate"
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            self.candidate_token = data['access_token']
+            response.success()
+        elif response.status_code == 401:
+            # Пробуем зарегистрироваться
+            self.register_candidate()
+        else:
+            response.failure(f"Login failed: {response.status_code}")
     
-    def _refresh_available_vacancies(self):
-        """Обновление списка доступных вакансий"""
-        token = self.candidate_token or self.hr_token
-        if not token:
-            return
-            
-        with self.client.get(
-            "/api/v1/vacancies",
-            headers={"Authorization": f"Bearer {token}"},
-            catch_response=True,
-            name="REFRESH: GET /api/v1/vacancies"
-        ) as response:
-            if response.status_code == 200:
-                vacancies = response.json()
-                self.available_vacancies = [v["vacancy_id"] for v in vacancies if v["vacancy_id"]]
-                response.success()
-    
-    def _get_random_my_vacancy(self):
-        """Получить случайную вакансию пользователя или создать новую"""
-        if self.my_vacancies:
-            return random.choice(self.my_vacancies)
-        elif self.hr_token:
-            # Создаем новую вакансию, если нет своих
-            return self._create_vacancy_sync()
-        return None
-    
-    def _create_vacancy_sync(self):
-        """Синхронное создание вакансии с возвратом ID"""
-        vacancy_data = {
-            "position_title": random.choice(VACANCY_TITLES),
-            "job_description": random.choice(VACANCY_DESCRIPTIONS),
-            "requirements": "Базовые требования для нагрузочного тестирования",
-            "questions": ["Вопрос 1?", "Вопрос 2?"]
+    def register_hr(self):
+        """Регистрация HR"""
+        register_data = {
+            "login": HR_CREDENTIALS["login"],
+            "password": HR_CREDENTIALS["password"],
+            "email": f"{HR_CREDENTIALS['login']}@test.com",
+            "full_name": "Test HR Manager",
+            "role": "HR"
         }
         
         response = self.client.post(
-            "/api/v1/vacancies",
-            headers={"Authorization": f"Bearer {self.hr_token}"},
-            json=vacancy_data
+            "/api/v1/register",
+            json=register_data,
+            catch_response=True,
+            name="[AUTH] Register HR"
         )
         
         if response.status_code == 201:
-            vacancy_id = response.json()["vacancy_id"]
-            self.my_vacancies.append(vacancy_id)
-            return vacancy_id
-        return None
+            data = response.json()
+            self.hr_token = data['access_token']
+            response.success()
+        else:
+            response.failure(f"Registration failed: {response.status_code}")
     
-    def _ensure_has_vacancies(self):
-        """Убедиться, что есть вакансии для операций"""
-        if not self.available_vacancies:
-            self._refresh_available_vacancies()
-        return len(self.available_vacancies) > 0
-
-    # ========== ЛЕГКИЕ GET ЗАПРОСЫ ==========
+    def register_candidate(self):
+        """Регистрация кандидата"""
+        register_data = {
+            "login": CANDIDATE_CREDENTIALS["login"],
+            "password": CANDIDATE_CREDENTIALS["password"],
+            "email": f"{CANDIDATE_CREDENTIALS['login']}@test.com",
+            "full_name": "Test Candidate",
+            "role": "Кандидат"
+        }
+        
+        response = self.client.post(
+            "/api/v1/register",
+            json=register_data,
+            catch_response=True,
+            name="[AUTH] Register Candidate"
+        )
+        
+        if response.status_code == 201:
+            data = response.json()
+            self.candidate_token = data['access_token']
+            response.success()
+        else:
+            response.failure(f"Registration failed: {response.status_code}")
     
-    @tag("get", "light", "candidate")
-    @task(8)
-    def get_vacancies_list(self):
-        """Получение списка вакансий (кандидат или HR)"""
-        token = self.candidate_token or self.hr_token
-        if not token:
+    # ========== GET запросы (легкие) ==========
+    
+    @tag("get_light")
+    @task(5)
+    def get_all_vacancies(self):
+        """GET: Получение всех вакансий"""
+        if not self.candidate_token:
             return
-            
+        
         with self.client.get(
             "/api/v1/vacancies",
-            headers={"Authorization": f"Bearer {token}"},
+            headers={"Authorization": f"Bearer {self.candidate_token}"},
             catch_response=True,
-            name="GET /api/v1/vacancies"
+            name="[GET] Get all vacancies"
         ) as response:
             if response.status_code == 200:
-                # Обновляем кэш доступных вакансий
-                vacancies = response.json()
-                self.available_vacancies = [v["vacancy_id"] for v in vacancies if v["vacancy_id"]]
                 response.success()
-            elif response.status_code == 401:
-                response.failure("Unauthorized")
             else:
                 response.failure(f"Status: {response.status_code}")
     
-    @tag("get", "light")
-    @task(6)
+    @tag("get_light")
+    @task(3)
     def get_my_profile(self):
-        """Получение профиля текущего пользователя"""
-        token = self.candidate_token or self.hr_token
-        if not token:
+        """GET: Получение своего профиля"""
+        if not self.candidate_token:
             return
-            
+        
         with self.client.get(
             "/api/v1/me",
-            headers={"Authorization": f"Bearer {token}"},
+            headers={"Authorization": f"Bearer {self.candidate_token}"},
             catch_response=True,
-            name="GET /api/v1/me"
+            name="[GET] Get my profile"
         ) as response:
             if response.status_code == 200:
                 response.success()
             else:
                 response.failure(f"Status: {response.status_code}")
     
-    @tag("get", "medium", "candidate")
-    @task(4)
-    def get_vacancy_detail(self):
-        """Получение деталей конкретной вакансии"""
-        if not self._ensure_has_vacancies():
-            return
-            
-        token = self.candidate_token or self.hr_token
-        vacancy_id = random.choice(self.available_vacancies)
-        
-        with self.client.get(
-            f"/api/v1/vacancies/{vacancy_id}",
-            headers={"Authorization": f"Bearer {token}"},
-            catch_response=True,
-            name="GET /api/v1/vacancies/{id}"
-        ) as response:
-            if response.status_code == 200:
-                response.success()
-            elif response.status_code == 404:
-                # Удаляем несуществующую вакансию из кэша
-                if vacancy_id in self.available_vacancies:
-                    self.available_vacancies.remove(vacancy_id)
-                response.failure("Vacancy not found")
-            else:
-                response.failure(f"Status: {response.status_code}")
-
-    # ========== HR-ОПЕРАЦИИ ==========
-    
-    @tag("hr", "create", "heavy")
-    @task(3)
-    def create_vacancy(self):
-        """Создание новой вакансии (только HR)"""
-        if not self.hr_token:
-            return
-            
-        vacancy_data = {
-            "position_title": f"{random.choice(VACANCY_TITLES)} {random.randint(1000, 9999)}",
-            "job_description": random.choice(VACANCY_DESCRIPTIONS),
-            "requirements": f"Требования для вакансии {random.randint(1, 100)}",
-            "questions": [
-                f"Вопрос по теме {random.randint(1, 10)}?",
-                "Расскажите о вашем опыте?",
-                "Какие технологии предпочитаете?"
-            ]
-        }
-        
-        with self.client.post(
-            "/api/v1/vacancies",
-            headers={"Authorization": f"Bearer {self.hr_token}"},
-            json=vacancy_data,
-            catch_response=True,
-            name="POST /api/v1/vacancies"
-        ) as response:
-            if response.status_code == 201:
-                data = response.json()
-                self.my_vacancies.append(data["vacancy_id"])
-                # Также добавляем в доступные вакансии
-                if data["vacancy_id"] not in self.available_vacancies:
-                    self.available_vacancies.append(data["vacancy_id"])
-                response.success()
-            else:
-                response.failure(f"Status: {response.status_code}")
-    
-    @tag("hr", "update", "medium")
+    @tag("get_light")
     @task(2)
-    def update_my_vacancy(self):
-        """Обновление вакансии (только свои вакансии)"""
-        if not self.hr_token or not self.my_vacancies:
-            # Если нет своих вакансий, создаем одну
-            if self.hr_token and not self.my_vacancies:
-                self._create_initial_vacancy()
-            return
-            
-        vacancy_id = random.choice(self.my_vacancies)
-        update_data = {
-            "job_description": f"Обновленное описание вакансии {datetime.now().strftime('%H:%M:%S')}",
-            "requirements": "Обновленные требования"
-        }
-        
-        with self.client.put(
-            f"/api/v1/vacancies/{vacancy_id}",
-            headers={"Authorization": f"Bearer {self.hr_token}"},
-            json=update_data,
-            catch_response=True,
-            name="PUT /api/v1/vacancies/{id}"
-        ) as response:
-            if response.status_code == 200:
-                response.success()
-            elif response.status_code in [403, 404]:
-                # Удаляем вакансию из списка, если нет доступа или не найдена
-                if vacancy_id in self.my_vacancies:
-                    self.my_vacancies.remove(vacancy_id)
-                response.failure(f"Status: {response.status_code}")
-            else:
-                response.failure(f"Status: {response.status_code}")
-    
-    @tag("hr", "get", "medium")
-    @task(2)
-    def get_all_users(self):
-        """Получение списка пользователей (только HR)"""
-        if not self.hr_token:
-            return
-            
-        with self.client.get(
-            "/api/v1/users",
-            headers={"Authorization": f"Bearer {self.hr_token}"},
-            catch_response=True,
-            name="GET /api/v1/users"
-        ) as response:
-            if response.status_code == 200:
-                response.success()
-            else:
-                response.failure(f"Status: {response.status_code}")
-    
-    @tag("hr", "get", "light")
-    @task(3)
     def get_statistics(self):
-        """Получение статистики (только HR)"""
+        """GET: Получение статистики (только HR)"""
         if not self.hr_token:
             return
-            
+        
         with self.client.get(
             "/api/v1/statistics/overview",
             headers={"Authorization": f"Bearer {self.hr_token}"},
             catch_response=True,
-            name="GET /api/v1/statistics/overview"
+            name="[GET] Get statistics"
         ) as response:
             if response.status_code == 200:
                 response.success()
             else:
                 response.failure(f"Status: {response.status_code}")
-
-    # ========== КАНДИДАТ-ОПЕРАЦИИ ==========
     
-    @tag("candidate", "resume", "medium")
+    # ========== POST запросы (тяжелые) ==========
+    
+    @tag("post_heavy")
     @task(2)
-    def create_or_update_resume(self):
-        """Создание или обновление резюме (только кандидат)"""
-        if not self.candidate_token:
-            return
-            
-        resume_data = {
-            "birth_date": "1990-01-15",
-            "contact_phone": f"+7-9{random.randint(10, 99)}-{random.randint(100, 999)}-{random.randint(10, 99)}-{random.randint(10, 99)}",
-            "contact_email": f"candidate_{random.randint(1000, 9999)}@test.com",
-            "education": "Высшее техническое образование",
-            "work_experience": f"Опыт работы {random.randint(1, 10)} лет",
-            "skills": "Python, FastAPI, PostgreSQL, Docker, Linux"
-        }
-        
-        # Сначала пытаемся создать резюме
-        with self.client.post(
-            "/api/v1/resumes",
-            headers={"Authorization": f"Bearer {self.candidate_token}"},
-            json=resume_data,
-            catch_response=True,
-            name="POST /api/v1/resumes"
-        ) as response:
-            if response.status_code == 201:
-                response.success()
-            elif response.status_code == 400:
-                # Если резюме уже существует, обновляем его
-                self._update_existing_resume(resume_data)
-            else:
-                response.failure(f"Status: {response.status_code}")
-    
-    def _update_existing_resume(self, resume_data):
-        """Обновление существующего резюме"""
-        with self.client.put(
-            "/api/v1/resumes/my",
-            headers={"Authorization": f"Bearer {self.candidate_token}"},
-            json=resume_data,
-            catch_response=True,
-            name="PUT /api/v1/resumes/my"
-        ) as response:
-            if response.status_code == 200:
-                response.success()
-            else:
-                response.failure(f"Update resume status: {response.status_code}")
-    
-    @tag("candidate", "get", "light")
-    @task(3)
-    def get_my_resume(self):
-        """Получение своего резюме (только кандидат)"""
-        if not self.candidate_token:
-            return
-            
-        with self.client.get(
-            "/api/v1/resumes/my",
-            headers={"Authorization": f"Bearer {self.candidate_token}"},
-            catch_response=True,
-            name="GET /api/v1/resumes/my"
-        ) as response:
-            if response.status_code == 200:
-                response.success()
-            elif response.status_code == 404:
-                response.success()  # Резюме еще нет - это нормально
-            else:
-                response.failure(f"Status: {response.status_code}")
-    
-    @tag("candidate", "get", "light")
-    @task(2)
-    def get_my_interviews(self):
-        """Получение своих собеседований (только кандидат)"""
-        if not self.candidate_token:
-            return
-            
-        with self.client.get(
-            "/api/v1/interviews/my",
-            headers={"Authorization": f"Bearer {self.candidate_token}"},
-            catch_response=True,
-            name="GET /api/v1/interviews/my"
-        ) as response:
-            if response.status_code == 200:
-                response.success()
-            else:
-                response.failure(f"Status: {response.status_code}")
-
-    # ========== КОМПЛЕКСНЫЕ СЦЕНАРИИ ==========
-    
-    @tag("complex", "candidate_flow")
-    @task(1)
-    def candidate_comprehensive_flow(self):
-        """Комплексный сценарий поведения кандидата"""
-        if not self.candidate_token:
-            return
-        
-        # 1. Просмотр списка вакансий
-        self.get_vacancies_list()
-        
-        # 2. Просмотр профиля
-        self.get_my_profile()
-        
-        # 3. Просмотр деталей случайной вакансии
-        if self.available_vacancies:
-            vacancy_id = random.choice(self.available_vacancies)
-            with self.client.get(
-                f"/api/v1/vacancies/{vacancy_id}",
-                headers={"Authorization": f"Bearer {self.candidate_token}"},
-                name="Complex: GET vacancy detail"
-            ) as response:
-                if response.status_code == 200:
-                    pass  # Успех
-        
-        # 4. Работа с резюме
-        self.get_my_resume()
-        
-        # 5. Просмотр собеседований
-        self.get_my_interviews()
-    
-    @tag("complex", "hr_flow")
-    @task(1)
-    def hr_comprehensive_flow(self):
-        """Комплексный сценарий поведения HR"""
+    def create_vacancy(self):
+        """POST: Создание вакансии (HR)"""
         if not self.hr_token:
             return
         
-        # 1. Создание вакансии
-        self.create_vacancy()
+        # Добавляем случайность к названию
+        vacancy_data = VACANCY_DATA.copy()
+        vacancy_data["position_title"] = f"{VACANCY_DATA['position_title']} #{random.randint(1, 1000)}"
         
-        # 2. Просмотр пользователей
-        self.get_all_users()
+        with self.client.post(
+            "/api/v1/vacancies",
+            headers={"Authorization": f"Bearer {self.hr_token}"},
+            json=vacancy_data,
+            catch_response=True,
+            name="[POST] Create vacancy"
+        ) as response:
+            if response.status_code == 201:
+                response.success()
+            else:
+                response.failure(f"Status: {response.status_code}")
+    
+    @tag("post_heavy")
+    @task(1)
+    def create_resume(self):
+        """POST: Создание резюме (Кандидат)"""
+        if not self.candidate_token:
+            return
         
-        # 3. Просмотр статистики
-        self.get_statistics()
-        
-        # 4. Обновление своей вакансии (если есть)
-        if self.my_vacancies:
-            self.update_my_vacancy()
-        
-        # 5. Просмотр всех вакансий
-        self.get_vacancies_list()
-
-
-# ========== СПЕЦИАЛИЗИРОВАННЫЕ КЛАССЫ ==========
-
-class CandidateUser(SimpleHRUser):
-    """Специализированный класс для кандидатов (только чтение)"""
-    wait_time = between(2.0, 5.0)
+        with self.client.post(
+            "/api/v1/resumes",
+            headers={"Authorization": f"Bearer {self.candidate_token}"},
+            json=RESUME_DATA,
+            catch_response=True,
+            name="[POST] Create resume"
+        ) as response:
+            if response.status_code in [201, 400]:  # 400 если уже существует
+                response.success()
+            else:
+                response.failure(f"Status: {response.status_code}")
     
-    def on_start(self):
-        """Только регистрация кандидата"""
-        test_users = get_test_users()
-        self._register_user(test_users["candidate"], "candidate")
-        if self.candidate_token:
-            self._refresh_available_vacancies()
+    # ========== PUT запросы (средние) ==========
     
-    @task(10)
-    def candidate_tasks(self):
-        """Задачи кандидата"""
-        tasks = [
-            self.get_vacancies_list,
-            self.get_my_profile,
-            self.get_vacancy_detail,
-            self.get_my_resume,
-            self.get_my_interviews
-        ]
-        random.choice(tasks)()
-
-
-class HRUser(SimpleHRUser):
-    """Специализированный класс для HR"""
-    wait_time = between(1.0, 2.0)
-    
-    def on_start(self):
-        """Только регистрация HR и создание вакансий"""
-        test_users = get_test_users()
-        if self._register_user(test_users["hr"], "hr"):
-            # Создаем несколько начальных вакансий
-            for _ in range(2):
-                self._create_initial_vacancy()
-            self._refresh_available_vacancies()
-    
-    @task(8)
-    def hr_tasks(self):
-        """Задачи HR"""
-        tasks = [
-            self.get_vacancies_list,
-            self.create_vacancy,
-            self.update_my_vacancy,
-            self.get_all_users,
-            self.get_statistics
-        ]
-        random.choice(tasks)()
-
-
-class MixedUser(SimpleHRUser):
-    """Пользователь с комбинированным поведением (HR + кандидат)"""
-    wait_time = between(1.5, 3.0)
-    
-    @task(5)
-    def light_tasks(self):
-        """Легкие задачи"""
-        tasks = [self.get_vacancies_list, self.get_my_profile]
-        random.choice(tasks)()
-    
-    @task(3)
-    def hr_specific_tasks(self):
-        """HR задачи (если есть токен)"""
-        if self.hr_token:
-            tasks = [self.create_vacancy, self.get_statistics]
-            random.choice(tasks)()
-    
+    @tag("put_medium")
     @task(2)
-    def candidate_specific_tasks(self):
-        """Кандидат задачи (если есть токен)"""
-        if self.candidate_token:
-            tasks = [self.get_my_resume, self.get_my_interviews]
-            random.choice(tasks)()
+    def update_resume(self):
+        """PUT: Обновление резюме"""
+        if not self.candidate_token:
+            return
+        
+        update_data = {
+            "skills": f"Python, FastAPI, PostgreSQL, Docker (updated {random.randint(1, 100)})"
+        }
+        
+        with self.client.put(
+            "/api/v1/resumes/my",
+            headers={"Authorization": f"Bearer {self.candidate_token}"},
+            json=update_data,
+            catch_response=True,
+            name="[PUT] Update resume"
+        ) as response:
+            if response.status_code in [200, 404]:  # 404 если еще не создано
+                response.success()
+            else:
+                response.failure(f"Status: {response.status_code}")
+    
+    
+    @tag("complex")
+    @task(1)
+    def hr_workflow(self):
+        """
+        Комплексный сценарий HR:
+        1. Получить список всех пользователей
+        2. Получить свои вакансии
+        3. Получить статистику
+        """
+        if not self.hr_token:
+            return
+        
+        headers = {"Authorization": f"Bearer {self.hr_token}"}
+        
+        # 1. Список пользователей
+        with self.client.get(
+            "/api/v1/users",
+            headers=headers,
+            catch_response=True,
+            name="[WORKFLOW] HR - Get users"
+        ) as response:
+            if response.status_code != 200:
+                response.failure(f"Status: {response.status_code}")
+                return
+        
+        # 2. Список вакансий
+        with self.client.get(
+            "/api/v1/vacancies",
+            headers=headers,
+            catch_response=True,
+            name="[WORKFLOW] HR - Get vacancies"
+        ) as response:
+            if response.status_code != 200:
+                response.failure(f"Status: {response.status_code}")
+                return
+        
+        # 3. Статистика
+        with self.client.get(
+            "/api/v1/statistics/overview",
+            headers=headers,
+            catch_response=True,
+            name="[WORKFLOW] HR - Get stats"
+        ) as response:
+            if response.status_code == 200:
+                response.success()
+            else:
+                response.failure(f"Status: {response.status_code}")
+
+
+
+class HROnlyUser(HttpUser):
+    """Эмулирует только действия HR"""
+    wait_time = between(1.0, 2.0)
+    hr_token = None
+    
+    def on_start(self):
+        """Вход как HR"""
+        response = self.client.post("/api/v1/login", json=HR_CREDENTIALS)
+        if response.status_code == 200:
+            self.hr_token = response.json()['access_token']
+    
+    @task
+    def hr_operations(self):
+        """Операции HR"""
+        if not self.hr_token:
+            return
+        
+        headers = {"Authorization": f"Bearer {self.hr_token}"}
+        
+        # Случайный выбор операции
+        operations = [
+            ("/api/v1/users", "GET"),
+            ("/api/v1/vacancies", "GET"),
+            ("/api/v1/statistics/overview", "GET"),
+        ]
+        
+        endpoint, method = random.choice(operations)
+        
+        if method == "GET":
+            self.client.get(endpoint, headers=headers)
+
+
+class CandidateOnlyUser(HttpUser):
+    """Эмулирует только действия кандидата"""
+    wait_time = between(1.0, 2.0)
+    candidate_token = None
+    
+    def on_start(self):
+        """Вход как кандидат"""
+        response = self.client.post("/api/v1/login", json=CANDIDATE_CREDENTIALS)
+        if response.status_code == 200:
+            self.candidate_token = response.json()['access_token']
+    
+    @task
+    def candidate_operations(self):
+        """Операции кандидата"""
+        if not self.candidate_token:
+            return
+        
+        headers = {"Authorization": f"Bearer {self.candidate_token}"}
+        
+        # Случайный выбор операции
+        operations = [
+            ("/api/v1/vacancies", "GET"),
+            ("/api/v1/me", "GET"),
+            ("/api/v1/resumes/my", "GET"),
+        ]
+        
+        endpoint, method = random.choice(operations)
+        self.client.get(endpoint, headers=headers)
+
+
+"""
+=== ИНСТРУКЦИЯ ПО ЗАПУСКУ ===
+
+1. Базовый запуск (с веб-интерфейсом):
+   locust -f locust_test.py --host=http://localhost:8000
+   
+   Затем открыть: http://localhost:8089
+   
+2. Запуск в headless режиме (для автоматического тестирования):
+   locust -f locust_test.py --host=http://localhost:8000 \
+          --users 50 --spawn-rate 5 --run-time 3m --headless
+
+3. Запуск только GET запросов:
+   locust -f locust_test.py --host=http://localhost:8000 \
+          --tags get_light
+
+4. Запуск только POST запросов:
+   locust -f locust_test.py --host=http://localhost:8000 \
+          --tags post_heavy
+
+5. Запуск только HR операций:
+   locust -f locust_test.py --host=http://localhost:8000 \
+          HROnlyUser
+
+=== РЕКОМЕНДАЦИИ ПО ТЕСТИРОВАНИЮ ===
+
+Этап 1 (Нагрузочное тестирование - GET+PUT):
+- Запустить с тегами: --tags get_light put_medium
+- Пользователи: 30-50
+- Spawn rate: 5
+- Длительность: 5 минут
+- Цель: нагрузка CPU < 60%
+
+Этап 2 (Объемное тестирование - добавляем POST):
+- Запустить с тегами: --tags get_light post_heavy put_medium
+- Пользователи: 50-70
+- Spawn rate: 10
+- Длительность: 5 минут
+- Цель: проверка работы с растущей БД
+
+Этап 3 (Стрессовое тестирование):
+- Запустить все задачи без фильтров
+- Пользователи: 100-200 (постепенно увеличивать)
+- Spawn rate: 10-20
+- Длительность: 10 минут
+- Цель: CPU 90-100%, отказы < 1%
+
+"""

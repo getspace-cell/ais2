@@ -118,32 +118,54 @@ async def transcribe_audio_to_text(audio_path: str) -> str:
         logger.error(f"Ошибка при транскрибации аудио: {e}")
         raise
 '''
-'''
+
+
 async def transcribe_audio_to_text(audio_path: str) -> str:
     """
-    Преобразование аудио в текст с использованием Whisper API
-    
-    Args:
-        audio_path: Путь к аудио файлу
-    
-    Returns:
-        Транскрибированный текст
+    Преобразование аудио в текст с использованием вашей модели на Hugging Face
     """
+    import asyncio
+    import logging
+    import torch
+    import librosa
+    import numpy as np
+    from transformers import WhisperProcessor, WhisperForConditionalGeneration
     import asyncio
     import logging
     import mlx_whisper 
 
-    try:
-        text = mlx_whisper.transcribe(audio_path, path_or_hf_repo="mlx-community/whisper-large-v3-turbo", language="ru")["text"]
-        print(text)
+    logger = logging.getLogger(__name__)
 
-        # В result хранится dict с ключом "text"
-        return text
+    try:
+
+
+        audio_array, sr = librosa.load(audio_path, sr=16000, mono=True)
+        
+        segment_length = 30 * 16000 
+        segments = []
+        
+        for start in range(0, len(audio_array), segment_length):
+            end = start + segment_length
+            segment = audio_array[start:end]
+            segments.append(segment)
+        
+        all_texts = []
+        
+        for i, segment in enumerate(segments):
+            print(f"Обрабатываю сегмент {i+1}/{len(segments)}")
+            
+            text = mlx_whisper.transcribe(segment, path_or_hf_repo="mlx-community/whisper-large-v3-turbo", language="ru")["text"]
+
+            all_texts.append(text)
+        
+        full_text = " ".join(all_texts)
+        print(f"Полный текст: {full_text}")
+        return full_text
         
     except Exception as e:
         logger.error(f"Ошибка при транскрибации аудио: {e}")
         raise
-    '''
+'''
 #дообученная
 async def transcribe_audio_to_text(audio_path: str) -> str:
     """
@@ -202,7 +224,7 @@ async def transcribe_audio_to_text(audio_path: str) -> str:
     except Exception as e:
         logger.error(f"Ошибка при транскрибации аудио: {e}")
         raise
-
+'''
 async def process_interview_video(video_bytes: bytes, candidate_id: int, vacancy_id: int) -> tuple[str, str, str]:
     """
     Полная обработка видео интервью
