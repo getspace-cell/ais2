@@ -1,18 +1,17 @@
 # ============================================================================
-# ФАЙЛ: models/dao.py
-# Описание: Объектно-реляционное отображение таблиц БД
+# ФАЙЛ: models/dao.py (ОБНОВЛЕННЫЙ)
+# Описание: Объектно-реляционное отображение с оценками пригодности
 # ============================================================================
 
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Text, Date, DateTime,
-    Float, ForeignKey, Enum as SQLEnum, JSON
+    Float, ForeignKey, Enum as SQLEnum, JSON, UniqueConstraint
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 import enum
 
-# Базовый класс для всех моделей
 Base = declarative_base()
 
 
@@ -30,13 +29,12 @@ class VacancyStatus(enum.Enum):
 
 
 # ============================================================================
-# ЕДИНАЯ ТАБЛИЦА ПОЛЬЗОВАТЕЛЕЙ (для авторизации)
+# ЕДИНАЯ ТАБЛИЦА ПОЛЬЗОВАТЕЛЕЙ
 # ============================================================================
 
 class User(Base):
     """
     Единая таблица пользователей для авторизации.
-    Содержит HR и Кандидатов.
     """
     __tablename__ = 'users'
 
@@ -48,10 +46,17 @@ class User(Base):
     role = Column(SQLEnum(UserRole), nullable=False)
     registration_date = Column(DateTime, default=datetime.utcnow)
     
-    # Отношения - используем строки для forward reference
+    # Отношения
     resume = relationship("Resume", back_populates="user", uselist=False, cascade="all, delete-orphan")
     hr_company_info = relationship("HRCompanyInfo", back_populates="hr", uselist=False, cascade="all, delete-orphan")
+    
+    # Новое: связь с HR, который загрузил кандидата
+    hr_id = Column(Integer, ForeignKey('users.user_id'), nullable=True, comment="HR который загрузил резюме")
+    hr = relationship("User", remote_side=[user_id], foreign_keys=[hr_id], backref="managed_candidates")
+    
     vacancies = relationship("Vacancy", back_populates="hr", cascade="all, delete-orphan")
+    vacancy_matches = relationship("VacancyMatch", back_populates="candidate", cascade="all, delete-orphan")
+    
     interviews_stage1_as_candidate = relationship(
         "InterviewStage1", 
         foreign_keys="InterviewStage1.candidate_id",
@@ -98,34 +103,25 @@ class User(Base):
 # ============================================================================
 
 class HRCompanyInfo(Base):
-    """
-    Дополнительная информация о HR и его компании.
-    Связана один-к-одному с User (где role=HR).
-    """
+    """Дополнительная информация о HR и его компании."""
     __tablename__ = 'hr_company_info'
 
     info_id = Column(Integer, primary_key=True, autoincrement=True)
     hr_id = Column(Integer, ForeignKey('users.user_id'), unique=True, nullable=False)
     
-    # Информация о позиции HR
     position = Column(String(100), comment="Должность HR в компании")
     department = Column(String(100), comment="Отдел")
-    
-    # Информация о компании
     company_name = Column(String(200), nullable=False, comment="Название компании")
     company_description = Column(Text, comment="Описание компании")
     company_website = Column(String(200), comment="Веб-сайт компании")
     company_size = Column(Integer, comment="Количество сотрудников")
     industry = Column(String(100), comment="Отрасль")
-    
-    # Контактная информация
     office_address = Column(Text, comment="Адрес офиса")
     contact_phone = Column(String(20), comment="Контактный телефон")
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Отношения
     hr = relationship("User", back_populates="hr_company_info")
 
     def __repr__(self) -> str:
@@ -133,13 +129,12 @@ class HRCompanyInfo(Base):
 
 
 # ============================================================================
-# РЕЗЮМЕ
+# РЕЗЮМЕ (РАСШИРЕННОЕ)
 # ============================================================================
 
 class Resume(Base):
     """
-    Резюме кандидата.
-    Связано один-к-одному с User (где role=CANDIDATE).
+    Резюме кандидата с расширенной информацией для AI анализа.
     """
     __tablename__ = 'resumes'
 
@@ -151,14 +146,29 @@ class Resume(Base):
     contact_phone = Column(String(20))
     contact_email = Column(String(100))
     
-    # Профессиональная информация
+    # Профессиональная информация (базовая)
     education = Column(Text)
     work_experience = Column(Text)
     skills = Column(Text)
     
+    # НОВОЕ: Расширенная информация для анализа
+    technical_skills = Column(JSON, comment="Список технических навыков")
+    soft_skills = Column(JSON, comment="Список soft skills")
+    languages = Column(JSON, comment="Языки и уровень владения")
+    certifications = Column(JSON, comment="Сертификаты и курсы")
+    projects = Column(JSON, comment="Описание проектов")
+    desired_position = Column(String(200), comment="Желаемая позиция")
+    desired_salary = Column(Integer, comment="Желаемая зарплата")
+    experience_years = Column(Integer, comment="Годы опыта")
+    
+    # AI анализ резюме
+    ai_summary = Column(Text, comment="Краткая сводка от AI")
+    ai_strengths = Column(JSON, comment="Сильные стороны по мнению AI")
+    ai_weaknesses = Column(JSON, comment="Слабые стороны по мнению AI")
+    
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Отношения
     user = relationship("User", back_populates="resume")
 
     def __repr__(self) -> str:
@@ -166,13 +176,12 @@ class Resume(Base):
 
 
 # ============================================================================
-# ВАКАНСИИ
+# ВАКАНСИИ (РАСШИРЕННЫЕ)
 # ============================================================================
 
 class Vacancy(Base):
     """
-    Вакансия, созданная HR-менеджером.
-    Содержит вопросы для собеседования и список прикрепленных кандидатов.
+    Вакансия с требованиями для AI анализа пригодности кандидатов.
     """
     __tablename__ = 'vacancies'
 
@@ -182,14 +191,22 @@ class Vacancy(Base):
     position_title = Column(String(100), nullable=False)
     job_description = Column(Text)
     requirements = Column(Text)
+    
+    # НОВОЕ: Структурированные требования для AI
+    required_technical_skills = Column(JSON, comment="Обязательные технические навыки")
+    optional_technical_skills = Column(JSON, comment="Желательные технические навыки")
+    required_soft_skills = Column(JSON, comment="Обязательные soft skills")
+    required_experience_years = Column(Integer, comment="Минимальный опыт работы")
+    required_languages = Column(JSON, comment="Требуемые языки")
+    salary_range = Column(JSON, comment="Вилка зарплаты {min, max}")
+    
     questions = Column(JSON, nullable=True, comment="Список вопросов для собеседования")
-    candidate_ids = Column(JSON, nullable=True, default=list, comment="Список ID кандидатов, прикрепленных к вакансии")
     status = Column(SQLEnum(VacancyStatus), default=VacancyStatus.OPEN)
     
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # Отношения
     hr = relationship("User", back_populates="vacancies")
+    matches = relationship("VacancyMatch", back_populates="vacancy", cascade="all, delete-orphan")
     interviews_stage1 = relationship("InterviewStage1", back_populates="vacancy", cascade="all, delete-orphan")
     interviews_stage2 = relationship("InterviewStage2", back_populates="vacancy", cascade="all, delete-orphan")
     reports = relationship("CandidateReport", back_populates="vacancy", cascade="all, delete-orphan")
@@ -197,14 +214,58 @@ class Vacancy(Base):
     def __repr__(self) -> str:
         return f"<Vacancy(id={self.vacancy_id}, title='{self.position_title}', status='{self.status.value}')>"
 
+
 # ============================================================================
-# СОБЕСЕДОВАНИЯ
+# НОВАЯ ТАБЛИЦА: СООТВЕТСТВИЕ КАНДИДАТОВ ВАКАНСИЯМ
+# ============================================================================
+
+class VacancyMatch(Base):
+    """
+    Оценка соответствия кандидата вакансии.
+    Автоматически создается при создании вакансии для всех кандидатов HR.
+    """
+    __tablename__ = 'vacancy_matches'
+    __table_args__ = (
+        UniqueConstraint('vacancy_id', 'candidate_id', name='unique_vacancy_candidate'),
+    )
+
+    match_id = Column(Integer, primary_key=True, autoincrement=True)
+    vacancy_id = Column(Integer, ForeignKey('vacancies.vacancy_id'), nullable=False)
+    candidate_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
+    
+    # Оценки соответствия (0-100)
+    overall_score = Column(Float, nullable=False, comment="Общая оценка пригодности 0-100")
+    technical_match_score = Column(Float, comment="Соответствие технических навыков")
+    experience_match_score = Column(Float, comment="Соответствие опыта")
+    soft_skills_match_score = Column(Float, comment="Соответствие soft skills")
+    
+    # Детальный анализ
+    matched_skills = Column(JSON, comment="Совпадающие навыки")
+    missing_skills = Column(JSON, comment="Недостающие навыки")
+    ai_recommendation = Column(Text, comment="Рекомендация AI")
+    ai_pros = Column(JSON, comment="Преимущества кандидата")
+    ai_cons = Column(JSON, comment="Недостатки кандидата")
+    
+    # Статус отбора
+    is_invited = Column(Integer, default=0, comment="Приглашен ли на интервью (0/1)")
+    is_rejected = Column(Integer, default=0, comment="Отклонен ли HR (0/1)")
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    vacancy = relationship("Vacancy", back_populates="matches")
+    candidate = relationship("User", back_populates="vacancy_matches")
+
+    def __repr__(self) -> str:
+        return f"<VacancyMatch(vacancy_id={self.vacancy_id}, candidate_id={self.candidate_id}, score={self.overall_score})>"
+
+
+# ============================================================================
+# СОБЕСЕДОВАНИЯ (БЕЗ ИЗМЕНЕНИЙ)
 # ============================================================================
 
 class InterviewStage1(Base):
-    """
-    Первый этап собеседования - оценка soft skills.
-    """
+    """Первый этап собеседования - оценка soft skills."""
     __tablename__ = 'interview_stage1'
 
     interview1_id = Column(Integer, primary_key=True, autoincrement=True)
@@ -212,18 +273,16 @@ class InterviewStage1(Base):
     hr_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
     vacancy_id = Column(Integer, ForeignKey('vacancies.vacancy_id'), nullable=False)
     
-    # Эти поля теперь необязательные (nullable=True), заполняются при submit_interview
     interview_date = Column(DateTime, nullable=True)
-    questions = Column(Text, nullable=True, comment="Вопросы заданные на собеседовании")
-    candidate_answers = Column(Text, nullable=True, comment="Ответы кандидата")
-    video_path = Column(String(500), nullable=True, comment="Путь к видео файлу")
-    audio_path = Column(String(500), nullable=True, comment="Путь к аудио файлу")
-    soft_skills_score = Column(Integer, nullable=True, comment="Оценка soft skills 0-100")
-    confidence_score = Column(Integer, nullable=True, comment="Оценка уверенности 0-100")
+    questions = Column(Text, nullable=True)
+    candidate_answers = Column(Text, nullable=True)
+    video_path = Column(String(500), nullable=True)
+    audio_path = Column(String(500), nullable=True)
+    soft_skills_score = Column(Integer, nullable=True)
+    confidence_score = Column(Integer, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # Отношения
     candidate = relationship("User", foreign_keys=[candidate_id], back_populates="interviews_stage1_as_candidate")
     hr = relationship("User", foreign_keys=[hr_id], back_populates="interviews_stage1_as_hr")
     vacancy = relationship("Vacancy", back_populates="interviews_stage1")
@@ -235,9 +294,7 @@ class InterviewStage1(Base):
 
 
 class InterviewStage2(Base):
-    """
-    Второй этап собеседования - техническая оценка (hard skills).
-    """
+    """Второй этап собеседования - техническая оценка."""
     __tablename__ = 'interview_stage2'
 
     interview2_id = Column(Integer, primary_key=True, autoincrement=True)
@@ -247,13 +304,12 @@ class InterviewStage2(Base):
     vacancy_id = Column(Integer, ForeignKey('vacancies.vacancy_id'), nullable=False)
     
     interview_date = Column(DateTime, nullable=False)
-    technical_tasks = Column(Text, comment="Технические задания")
-    candidate_solutions = Column(Text, comment="Решения кандидата")
-    hard_skills_score = Column(Integer, comment="Оценка hard skills 0-100")
+    technical_tasks = Column(Text)
+    candidate_solutions = Column(Text)
+    hard_skills_score = Column(Integer)
     
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # Отношения
     candidate = relationship("User", foreign_keys=[candidate_id], back_populates="interviews_stage2_as_candidate")
     hr = relationship("User", foreign_keys=[hr_id], back_populates="interviews_stage2_as_hr")
     stage1 = relationship("InterviewStage1", back_populates="stage2")
@@ -265,14 +321,11 @@ class InterviewStage2(Base):
 
 
 # ============================================================================
-# ОТЧЕТЫ
+# ОТЧЕТЫ (БЕЗ ИЗМЕНЕНИЙ)
 # ============================================================================
 
 class CandidateReport(Base):
-    """
-    Итоговый отчет по кандидату.
-    Генерируется после прохождения собеседований.
-    """
+    """Итоговый отчет по кандидату."""
     __tablename__ = 'candidate_reports'
 
     report_id = Column(Integer, primary_key=True, autoincrement=True)
@@ -283,12 +336,11 @@ class CandidateReport(Base):
     interview2_id = Column(Integer, ForeignKey('interview_stage2.interview2_id'))
     
     generation_date = Column(DateTime, default=datetime.utcnow)
-    final_score = Column(Float, comment="Итоговая оценка 0-100")
-    hr_recommendations = Column(Text, comment="Рекомендации HR")
+    final_score = Column(Float)
+    hr_recommendations = Column(Text)
     
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # Отношения
     candidate = relationship("User", foreign_keys=[candidate_id], back_populates="reports_as_candidate")
     hr = relationship("User", foreign_keys=[hr_id], back_populates="reports_as_hr")
     vacancy = relationship("Vacancy", back_populates="reports")
