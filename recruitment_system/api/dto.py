@@ -528,3 +528,148 @@ class VacancyCandidatesStatsDTO(BaseModel):
                 "not_invited_yet": 3
             }
         }
+
+# ========== Vacancy Match DTO ==========
+
+class VacancyMatchResponseDTO(BaseModel):
+    """DTO для ответа с информацией о соответствии кандидата вакансии"""
+    match_id: int
+    vacancy_id: int
+    candidate_id: int
+    candidate_name: str = Field(..., description="Имя кандидата")
+    
+    overall_score: float = Field(..., description="Общая оценка пригодности 0-100")
+    technical_match_score: Optional[float]
+    experience_match_score: Optional[float]
+    soft_skills_match_score: Optional[float]
+    
+    matched_skills: Optional[List[str]]
+    missing_skills: Optional[List[str]]
+    ai_recommendation: Optional[str]
+    ai_pros: Optional[List[str]]
+    ai_cons: Optional[List[str]]
+    
+    is_invited: int = Field(..., description="Приглашен на интервью (0/1)")
+    is_rejected: int = Field(..., description="Отклонен HR (0/1)")
+    
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class VacancyMatchFilterDTO(BaseModel):
+    """DTO для фильтрации кандидатов по вакансии"""
+    min_overall_score: Optional[float] = Field(None, ge=0, le=100, description="Минимальная общая оценка")
+    min_technical_score: Optional[float] = Field(None, ge=0, le=100)
+    min_experience_score: Optional[float] = Field(None, ge=0, le=100)
+    required_skills: Optional[List[str]] = Field(None, description="Обязательные навыки")
+    hide_rejected: bool = Field(True, description="Скрыть отклоненных кандидатов")
+    hide_invited: bool = Field(False, description="Скрыть уже приглашенных")
+    sort_by: str = Field("overall_score", description="Поле для сортировки")
+    sort_desc: bool = Field(True, description="Сортировка по убыванию")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "min_overall_score": 70.0,
+                "min_technical_score": 60.0,
+                "required_skills": ["Python", "FastAPI"],
+                "hide_rejected": True,
+                "hide_invited": False,
+                "sort_by": "overall_score",
+                "sort_desc": True
+            }
+        }
+
+
+class RejectCandidateDTO(BaseModel):
+    """DTO для отклонения кандидата"""
+    candidate_id: int = Field(..., description="ID кандидата")
+    reason: Optional[str] = Field(None, description="Причина отклонения")
+
+
+# ========== Extended Vacancy DTO ==========
+
+class VacancyCreateExtendedDTO(BaseModel):
+    """DTO для создания вакансии с автоматическим анализом"""
+    position_title: str = Field(..., min_length=2, max_length=100)
+    job_description: Optional[str] = None
+    requirements: Optional[str] = None
+    questions: Optional[List[str]] = None
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "position_title": "Senior Backend Developer",
+                "job_description": "Разработка высоконагруженных систем на Python/FastAPI",
+                "requirements": "Python 3.9+, FastAPI, PostgreSQL, Docker, опыт 5+ лет, английский B2",
+                "questions": [
+                    "Расскажите о вашем опыте работы с микросервисами",
+                    "Как вы подходите к оптимизации производительности?"
+                ]
+            }
+        }
+
+
+class VacancyWithMatchesResponseDTO(BaseModel):
+    """DTO для вакансии со списком подходящих кандидатов"""
+    vacancy_id: int
+    position_title: str
+    job_description: Optional[str]
+    requirements: Optional[str]
+    status: str
+    
+    total_candidates: int = Field(..., description="Всего кандидатов в базе HR")
+    matched_candidates: int = Field(..., description="Кандидатов после фильтрации")
+    average_match_score: float = Field(..., description="Средняя оценка соответствия")
+    
+    top_candidates: List[VacancyMatchResponseDTO] = Field(..., description="Топ кандидаты")
+    
+    created_at: datetime
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "vacancy_id": 1,
+                "position_title": "Senior Backend Developer",
+                "job_description": "...",
+                "requirements": "...",
+                "status": "Открыта",
+                "total_candidates": 50,
+                "matched_candidates": 15,
+                "average_match_score": 72.5,
+                "top_candidates": [],
+                "created_at": "2024-01-15T10:00:00"
+            }
+        }
+
+
+# ========== Bulk Upload Response (Updated) ==========
+
+class BulkUploadResponseDTO(BaseModel):
+    """DTO для ответа после массовой загрузки резюме"""
+    message: str
+    total_processed: int
+    successful: int
+    failed: int
+    candidates: List[dict] = Field(..., description="Список созданных кандидатов")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "Успешно обработано 10 резюме",
+                "total_processed": 10,
+                "successful": 9,
+                "failed": 1,
+                "candidates": [
+                    {
+                        "user_id": 15,
+                        "full_name": "Иван Иванов",
+                        "email": "ivan@email.com",
+                        "desired_position": "Backend Developer",
+                        "experience_years": 5
+                    }
+                ]
+            }
+        }

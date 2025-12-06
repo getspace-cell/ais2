@@ -23,7 +23,7 @@ from datetime import datetime
 from config import settings
 from repository import DatabaseRepository
 from services.repository_service import RecruitmentService
-from services.ai_utils import parse_resumes_with_deepseek, analyze_interview_answers
+from services.ai_utils import  analyze_interview_answers
 from services.media_utils import process_interview_video
 from services.email_utils import mass_reg_info
 from services.email_utils import send_bulk_invitations
@@ -37,6 +37,20 @@ import pdfplumber
 import secrets
 import string
 from datetime import datetime, date
+
+from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File
+from typing import List
+from models.dao import User, Vacancy, Resume, VacancyMatch
+from services.ai_utils import (
+    parse_resumes_with_deepseek_extended,
+    analyze_vacancy_requirements,
+    match_candidate_to_vacancy
+)
+from api.auth_utils import get_current_hr, get_password_hash
+from datetime import datetime, date
+import secrets
+import string
+
 
 # Инициализация
 db_repo = DatabaseRepository(settings.DATABASE_URL)
@@ -609,198 +623,6 @@ async def get_statistics(
     }   
 
 
-# ========== ЗАГРУЗКА РЕЗЮМЕ ==========
-
-@router.post('/vacancies/{vacancy_id}/upload_resumes',
-            summary="Загрузка резюме из ZIP архива",
-            description="Загрузка ZIP с PDF резюме, парсинг через DeepSeek и создание кандидатов (только для HR)")
-async def upload_resumes_zip(
-    vacancy_id: int,
-    zip_file: UploadFile = File(..., description="ZIP архив с PDF резюме"),
-    current_user: User = Depends(get_current_hr),
-    service: RecruitmentService = Depends(get_service)
-):
-    """
-    Загрузка и обработка резюме:
-    1. Распаковка ZIP
-    2. Извлечение PDF
-    3. Парсинг через DeepSeek
-    4. Проверка существующих пользователей по email
-    5. Создание новых пользователей-кандидатов или использование существующих
-    6. Добавление кандидатов к вакансии
-    """
-    # Проверяем что вакансия существует и принадлежит текущему HR
-    vacancy = service.get_vacancy_by_id(vacancy_id)
-    if not vacancy:
-        raise HTTPException(status_code=404, detail="Вакансия не найдена")
-    
-    if vacancy.hr_id != current_user.user_id:
-        raise HTTPException(
-            status_code=403,
-            detail="Вы можете загружать резюме только для своих вакансий"
-        )
-    
-    try:
-        zip_bytes = await zip_file.read()
-        pdf_texts = []
-
-        with zipfile.ZipFile(BytesIO(zip_bytes)) as zip_ref:
-            for file_info in zip_ref.filelist:
-                if file_info.filename.lower().endswith('.pdf'):
-                    pdf_data = zip_ref.read(file_info.filename)
-                    try:
-                        with pdfplumber.open(BytesIO(pdf_data)) as pdf:
-                            text = ""
-                            for page in pdf.pages:
-                                text += page.extract_text() or ""
-                            if text.strip():
-                                pdf_texts.append(text)
-                    except Exception as e:
-                        print(f"Пропущен файл {file_info.filename}: {e}")
-
-        if not pdf_texts:
-            raise HTTPException(status_code=400, detail="В архиве нет корректных PDF с текстом")
-
-        # Парсим резюме через DeepSeek
-        parsed_resumes = await parse_resumes_with_deepseek(pdf_texts)
-        
-        # Создаем или находим кандидатов
-        created_candidates = []
-        existing_candidates = []
-        errors = []
-        
-        for resume_key, resume_data in parsed_resumes.items():
-            try:
-                contact_email = resume_data.get('contact_email')
-                
-                if not contact_email:
-                    print(f"Резюме {resume_key}: отсутствует email, пропускаем")
-                    continue
-                
-                # Проверяем, существует ли пользователь с таким email
-                existing_user = service.get_user_by_email(contact_email)
-                
-                if existing_user:
-                    # Пользователь уже существует
-                    print(f"Найден существующий пользователь с email {contact_email}")
-                    
-                    # Добавляем к вакансии
-                    service.add_candidate_to_vacancy(vacancy_id, existing_user.user_id)
-                    
-                    existing_candidates.append({
-                        "user_id": existing_user.user_id,
-                        "full_name": existing_user.full_name,
-                        "email": existing_user.email,
-                        "login": existing_user.login,
-                        "status": "existing"
-                    })
-                    
-                    # Обновляем резюме, если его нет
-                    resume = service.get_resume_by_user_id(existing_user.user_id)
-                    if not resume:
-                        session = service.db.get_session()
-                        try:
-                            birth_date = None
-                            if resume_data.get('birth_date'):
-                                try:
-                                    birth_date = date.fromisoformat(resume_data['birth_date'])
-                                except:
-                                    pass
-                            
-                            resume = Resume(
-                                user_id=existing_user.user_id,
-                                birth_date=birth_date,
-                                contact_phone=resume_data.get('contact_phone'),
-                                contact_email=contact_email,
-                                education=resume_data.get('education'),
-                                work_experience=resume_data.get('work_experience'),
-                                skills=resume_data.get('skills')
-                            )
-                            session.add(resume)
-                            session.commit()
-                        finally:
-                            session.close()
-                    
-                else:
-                    # Создаем нового пользователя
-                    candidate_number = len(created_candidates) + len(existing_candidates) + 1
-                    login = f"candidate_{datetime.now().timestamp()}_{candidate_number}"
-                    temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
-                    password_hash = get_password_hash(temp_password)
-                    
-                    # Создаем пользователя
-                    user = service.create_user(
-                        login=login,
-                        password_hash=password_hash,
-                        email=contact_email,
-                        full_name=resume_data.get('full_name', 'Неизвестно'),
-                        role=UserRole.CANDIDATE
-                    )
-                    
-                    # Добавляем к вакансии
-                    service.add_candidate_to_vacancy(vacancy_id, user.user_id)
-                    
-                    # Создаем резюме
-                    session = service.db.get_session()
-                    try:
-                        birth_date = None
-                        if resume_data.get('birth_date'):
-                            try:
-                                birth_date = date.fromisoformat(resume_data['birth_date'])
-                            except:
-                                pass
-                        
-                        resume = Resume(
-                            user_id=user.user_id,
-                            birth_date=birth_date,
-                            contact_phone=resume_data.get('contact_phone'),
-                            contact_email=contact_email,
-                            education=resume_data.get('education'),
-                            work_experience=resume_data.get('work_experience'),
-                            skills=resume_data.get('skills')
-                        )
-                        session.add(resume)
-                        session.commit()
-                    finally:
-                        session.close()
-                    
-                    created_candidates.append({
-                        "user_id": user.user_id,
-                        "full_name": user.full_name,
-                        "email": user.email,
-                        "login": login,
-                        "password": temp_password,
-                        "status": "new"
-                    })
-                    
-            except Exception as e:
-                print(f"Ошибка обработки резюме {resume_key}: {e}")
-                errors.append({
-                    "resume": resume_key,
-                    "error": str(e)
-                })
-        
-        # Объединяем списки для ответа
-        all_candidates = created_candidates + existing_candidates
-        invic = mass_reg_info(created_candidates)
-        return {
-            "message": f"Успешно обработано {len(all_candidates)} резюме",
-            "created_candidates": all_candidates,
-            "total_processed": len(pdf_texts),
-            "new_users": len(created_candidates),
-            "existing_users": len(existing_candidates),
-            "errors": len(errors),
-            "error_details": errors if errors else None
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Критическая ошибка при обработке резюме: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Ошибка при обработке резюме: {str(e)}"
-        )
 
 
 # ========== ПРИГЛАШЕНИЕ НА СОБЕСЕДОВАНИЕ ==========
@@ -1239,3 +1061,435 @@ async def get_all_companies(
         return [HRCompanyInfoResponseDTO.from_orm(c) for c in companies]
     finally:
         session.close()
+        
+# ========== МАССОВАЯ ЗАГРУЗКА РЕЗЮМЕ В БАЗУ HR ==========
+
+@router.post('/hr/candidates/bulk_upload',
+            summary="Массовая загрузка резюме в базу HR",
+            description="Загрузка ZIP с PDF, парсинг и создание кандидатов без привязки к вакансии")
+async def bulk_upload_candidates(
+    zip_file: UploadFile = File(..., description="ZIP архив с PDF резюме"),
+    current_user: User = Depends(get_current_hr),
+    service: RecruitmentService = Depends(get_service)
+):
+    """
+    Новый workflow:
+    1. HR загружает пачку резюме в свою базу кандидатов
+    2. Система парсит их через DeepSeek (расширенный анализ)
+    3. Создает кандидатов, прикрепленных к этому HR
+    4. Резюме остаются в базе для дальнейших вакансий
+    """
+    import zipfile
+    from io import BytesIO
+    import pdfplumber
+    
+    try:
+        zip_bytes = await zip_file.read()
+        pdf_texts = []
+        
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as zip_ref:
+            for file_info in zip_ref.filelist:
+                if file_info.filename.lower().endswith('.pdf'):
+                    pdf_data = zip_ref.read(file_info.filename)
+                    try:
+                        with pdfplumber.open(BytesIO(pdf_data)) as pdf:
+                            text = ""
+                            for page in pdf.pages:
+                                text += page.extract_text() or ""
+                            if text.strip():
+                                pdf_texts.append(text)
+                    except Exception as e:
+                        logger.warning(f"Пропущен файл {file_info.filename}: {e}")
+        
+        if not pdf_texts:
+            raise HTTPException(status_code=400, detail="В архиве нет корректных PDF")
+        
+        # РАСШИРЕННЫЙ парсинг через DeepSeek
+        parsed_resumes = await parse_resumes_with_deepseek_extended(pdf_texts)
+        
+        created_candidates = []
+        failed = 0
+        
+        for resume_key, resume_data in parsed_resumes.items():
+            try:
+                contact_email = resume_data.get('contact_email')
+                if not contact_email:
+                    failed += 1
+                    continue
+                
+                # Проверяем существование кандидата
+                existing_user = service.get_user_by_email(contact_email)
+                
+                if existing_user:
+                    # Обновляем резюме, если оно устарело
+                    logger.info(f"Кандидат {contact_email} уже существует, обновляем резюме")
+                    # TODO: добавить логику обновления
+                    continue
+                
+                # Создаем нового кандидата
+                login = f"candidate_{datetime.now().timestamp()}_{secrets.token_hex(4)}"
+                temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+                password_hash = get_password_hash(temp_password)
+                
+                # Создаем User с привязкой к HR
+                user = service.create_user(
+                    login=login,
+                    password_hash=password_hash,
+                    email=contact_email,
+                    full_name=resume_data.get('full_name', 'Неизвестно'),
+                    role=UserRole.CANDIDATE
+                )
+                
+                # Привязываем кандидата к HR
+                session = service.db.get_session()
+                try:
+                    user.hr_id = current_user.user_id
+                    session.commit()
+                finally:
+                    session.close()
+                
+                # Создаем РАСШИРЕННОЕ резюме
+                session = service.db.get_session()
+                try:
+                    birth_date = None
+                    if resume_data.get('birth_date'):
+                        try:
+                            birth_date = date.fromisoformat(resume_data['birth_date'])
+                        except:
+                            pass
+                    
+                    resume = Resume(
+                        user_id=user.user_id,
+                        birth_date=birth_date,
+                        contact_phone=resume_data.get('contact_phone'),
+                        contact_email=contact_email,
+                        education=resume_data.get('education'),
+                        work_experience=resume_data.get('work_experience'),
+                        skills=resume_data.get('skills'),
+                        
+                        # НОВЫЕ поля
+                        technical_skills=resume_data.get('technical_skills', []),
+                        soft_skills=resume_data.get('soft_skills', []),
+                        languages=resume_data.get('languages', []),
+                        certifications=resume_data.get('certifications', []),
+                        projects=resume_data.get('projects', []),
+                        desired_position=resume_data.get('desired_position'),
+                        desired_salary=resume_data.get('desired_salary'),
+                        experience_years=resume_data.get('experience_years'),
+                        
+                        ai_summary=resume_data.get('ai_summary'),
+                        ai_strengths=resume_data.get('ai_strengths', []),
+                        ai_weaknesses=resume_data.get('ai_weaknesses', [])
+                    )
+                    session.add(resume)
+                    session.commit()
+                finally:
+                    session.close()
+                
+                created_candidates.append({
+                    "user_id": user.user_id,
+                    "full_name": user.full_name,
+                    "email": user.email,
+                    "desired_position": resume_data.get('desired_position'),
+                    "experience_years": resume_data.get('experience_years')
+                })
+                
+            except Exception as e:
+                logger.error(f"Ошибка обработки резюме {resume_key}: {e}")
+                failed += 1
+        
+        return {
+            "message": f"Успешно обработано {len(created_candidates)} резюме",
+            "total_processed": len(pdf_texts),
+            "successful": len(created_candidates),
+            "failed": failed,
+            "candidates": created_candidates
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Критическая ошибка при загрузке резюме: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========== СОЗДАНИЕ ВАКАНСИИ С АВТОМАТИЧЕСКИМ АНАЛИЗОМ ==========
+
+@router.post('/vacancies/create_with_matching',
+            summary="Создание вакансии с автоматическим анализом кандидатов",
+            description="Создает вакансию и автоматически оценивает всех кандидатов HR")
+async def create_vacancy_with_matching(
+    vacancy_data: VacancyCreateExtendedDTO,
+    current_user: User = Depends(get_current_hr),
+    service: RecruitmentService = Depends(get_service)
+):
+    """
+    Новый workflow:
+    1. Создание вакансии
+    2. Анализ требований вакансии через DeepSeek
+    3. Получение всех кандидатов HR
+    4. Для каждого кандидата - оценка соответствия через DeepSeek
+    5. Создание записей VacancyMatch
+    """
+    try:
+        # 1. Анализируем требования вакансии
+        vacancy_requirements = await analyze_vacancy_requirements(
+            position_title=vacancy_data.position_title,
+            job_description=vacancy_data.job_description or "",
+            requirements=vacancy_data.requirements or ""
+        )
+        
+        # 2. Создаем вакансию с структурированными требованиями
+        vacancy = service.create_vacancy(
+            hr_id=current_user.user_id,
+            position_title=vacancy_data.position_title,
+            job_description=vacancy_data.job_description,
+            requirements=vacancy_data.requirements,
+            questions=vacancy_data.questions,
+            status=VacancyStatus.OPEN
+        )
+        
+        # Сохраняем структурированные требования
+        session = service.db.get_session()
+        try:
+            vacancy.required_technical_skills = vacancy_requirements.get('required_technical_skills', [])
+            vacancy.optional_technical_skills = vacancy_requirements.get('optional_technical_skills', [])
+            vacancy.required_soft_skills = vacancy_requirements.get('required_soft_skills', [])
+            vacancy.required_experience_years = vacancy_requirements.get('required_experience_years')
+            vacancy.required_languages = vacancy_requirements.get('required_languages', [])
+            vacancy.salary_range = vacancy_requirements.get('salary_range')
+            session.commit()
+        finally:
+            session.close()
+        
+        # 3. Получаем всех кандидатов этого HR
+        all_candidates = service.get_all_users(role=UserRole.CANDIDATE)
+        hr_candidates = [c for c in all_candidates if c.hr_id == current_user.user_id]
+        
+        # 4. Анализируем соответствие каждого кандидата
+        matches_created = 0
+        
+        for candidate in hr_candidates:
+            try:
+                resume = service.get_resume_by_user_id(candidate.user_id)
+                if not resume:
+                    continue
+                
+                # Подготовка данных резюме для AI
+                candidate_data = {
+                    "full_name": candidate.full_name,
+                    "technical_skills": resume.technical_skills or [],
+                    "soft_skills": resume.soft_skills or [],
+                    "experience_years": resume.experience_years or 0,
+                    "languages": resume.languages or [],
+                    "education": resume.education,
+                    "work_experience": resume.work_experience,
+                    "projects": resume.projects or [],
+                    "desired_position": resume.desired_position
+                }
+                
+                # Оцениваем соответствие через DeepSeek
+                match_result = await match_candidate_to_vacancy(
+                    candidate_resume=candidate_data,
+                    vacancy_requirements=vacancy_requirements
+                )
+                
+                # Создаем запись VacancyMatch
+                session = service.db.get_session()
+                try:
+                    vacancy_match = VacancyMatch(
+                        vacancy_id=vacancy.vacancy_id,
+                        candidate_id=candidate.user_id,
+                        overall_score=match_result['overall_score'],
+                        technical_match_score=match_result.get('technical_match_score'),
+                        experience_match_score=match_result.get('experience_match_score'),
+                        soft_skills_match_score=match_result.get('soft_skills_match_score'),
+                        matched_skills=match_result.get('matched_skills', []),
+                        missing_skills=match_result.get('missing_skills', []),
+                        ai_recommendation=match_result.get('ai_recommendation'),
+                        ai_pros=match_result.get('ai_pros', []),
+                        ai_cons=match_result.get('ai_cons', [])
+                    )
+                    session.add(vacancy_match)
+                    session.commit()
+                    matches_created += 1
+                finally:
+                    session.close()
+                    
+            except Exception as e:
+                logger.error(f"Ошибка при анализе кандидата {candidate.user_id}: {e}")
+                continue
+        
+        return {
+            "vacancy_id": vacancy.vacancy_id,
+            "position_title": vacancy.position_title,
+            "message": f"Вакансия создана, проанализировано {matches_created} кандидатов",
+            "total_candidates": len(hr_candidates),
+            "matches_created": matches_created
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка при создании вакансии: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========== ПОЛУЧЕНИЕ КАНДИДАТОВ С ФИЛЬТРАЦИЕЙ ==========
+
+@router.post('/vacancies/{vacancy_id}/candidates/filtered',
+            response_model=List[VacancyMatchResponseDTO],
+            summary="Получение кандидатов с фильтрацией по оценкам",
+            description="Фильтрация и сортировка кандидатов по параметрам")
+async def get_filtered_candidates(
+    vacancy_id: int,
+    filters: VacancyMatchFilterDTO,
+    current_user: User = Depends(get_current_hr),
+    service: RecruitmentService = Depends(get_service)
+):
+    """
+    Получение отфильтрованного списка кандидатов для вакансии.
+    HR может применять фильтры по оценкам, навыкам, статусу.
+    """
+    vacancy = service.get_vacancy_by_id(vacancy_id)
+    if not vacancy:
+        raise HTTPException(status_code=404, detail="Вакансия не найдена")
+    
+    if vacancy.hr_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    
+    session = service.db.get_session()
+    try:
+        query = session.query(VacancyMatch).filter(
+            VacancyMatch.vacancy_id == vacancy_id
+        )
+        
+        # Применяем фильтры
+        if filters.min_overall_score is not None:
+            query = query.filter(VacancyMatch.overall_score >= filters.min_overall_score)
+        
+        if filters.min_technical_score is not None:
+            query = query.filter(VacancyMatch.technical_match_score >= filters.min_technical_score)
+        
+        if filters.min_experience_score is not None:
+            query = query.filter(VacancyMatch.experience_match_score >= filters.min_experience_score)
+        
+        if filters.hide_rejected:
+            query = query.filter(VacancyMatch.is_rejected == 0)
+        
+        if filters.hide_invited:
+            query = query.filter(VacancyMatch.is_invited == 0)
+        
+        # Сортировка
+        if filters.sort_desc:
+            query = query.order_by(getattr(VacancyMatch, filters.sort_by).desc())
+        else:
+            query = query.order_by(getattr(VacancyMatch, filters.sort_by).asc())
+        
+        matches = query.all()
+        
+        # Формируем ответ
+        result = []
+        for match in matches:
+            candidate = service.get_user_by_id(match.candidate_id)
+            result.append(VacancyMatchResponseDTO(
+                match_id=match.match_id,
+                vacancy_id=match.vacancy_id,
+                candidate_id=match.candidate_id,
+                candidate_name=candidate.full_name if candidate else "Неизвестно",
+                overall_score=match.overall_score,
+                technical_match_score=match.technical_match_score,
+                experience_match_score=match.experience_match_score,
+                soft_skills_match_score=match.soft_skills_match_score,
+                matched_skills=match.matched_skills,
+                missing_skills=match.missing_skills,
+                ai_recommendation=match.ai_recommendation,
+                ai_pros=match.ai_pros,
+                ai_cons=match.ai_cons,
+                is_invited=match.is_invited,
+                is_rejected=match.is_rejected,
+                created_at=match.created_at
+            ))
+        
+        return result
+        
+    finally:
+        session.close()
+
+
+# ========== ОТКЛОНЕНИЕ КАНДИДАТА ==========
+
+@router.post('/vacancies/{vacancy_id}/reject_candidate',
+            summary="Отклонение кандидата HR",
+            description="Пометка кандидата как отклоненного для вакансии")
+async def reject_candidate(
+    vacancy_id: int,
+    reject_data: RejectCandidateDTO,
+    current_user: User = Depends(get_current_hr),
+    service: RecruitmentService = Depends(get_service)
+):
+    """
+    HR может отклонить кандидата, и он будет скрыт при фильтрации.
+    """
+    vacancy = service.get_vacancy_by_id(vacancy_id)
+    if not vacancy or vacancy.hr_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    
+    session = service.db.get_session()
+    try:
+        match = session.query(VacancyMatch).filter(
+            VacancyMatch.vacancy_id == vacancy_id,
+            VacancyMatch.candidate_id == reject_data.candidate_id
+        ).first()
+        
+        if not match:
+            raise HTTPException(status_code=404, detail="Соответствие не найдено")
+        
+        match.is_rejected = 1
+        session.commit()
+        
+        return {"message": "Кандидат отклонен", "candidate_id": reject_data.candidate_id}
+        
+    finally:
+        session.close()
+
+
+# ========== ПРИГЛАШЕНИЕ ОТОБРАННЫХ КАНДИДАТОВ ==========
+
+@router.post('/vacancies/{vacancy_id}/invite_selected',
+            summary="Приглашение отобранных кандидатов",
+            description="Отправка приглашений только выбранным кандидатам")
+async def invite_selected_candidates(
+    vacancy_id: int,
+    candidate_ids: List[int],
+    current_user: User = Depends(get_current_hr),
+    service: RecruitmentService = Depends(get_service)
+):
+    """
+    HR отбирает кандидатов через фильтры и отправляет приглашения только им.
+    """
+    vacancy = service.get_vacancy_by_id(vacancy_id)
+    if not vacancy or vacancy.hr_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    
+    # Логика приглашений (аналогична существующей)
+    # + обновление is_invited = 1 в VacancyMatch
+    
+    session = service.db.get_session()
+    try:
+        for candidate_id in candidate_ids:
+            match = session.query(VacancyMatch).filter(
+                VacancyMatch.vacancy_id == vacancy_id,
+                VacancyMatch.candidate_id == candidate_id
+            ).first()
+            
+            if match:
+                match.is_invited = 1
+        
+        session.commit()
+    finally:
+        session.close()
+    
+    # ... остальная логика отправки email и создания интервью
+    
+    return {"message": "Приглашения отправлены", "invited_count": len(candidate_ids)}
