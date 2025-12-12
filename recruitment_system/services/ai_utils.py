@@ -83,7 +83,8 @@ async def parse_resumes_with_deepseek_extended(pdf_texts: List[str]) -> Dict[str
             response.raise_for_status()
             result = response.json()
             content = result["choices"][0]["message"]["content"]
-
+            print(response.status_code)
+            print(content)
             # Извлекаем JSON
             if "```json" in content:
                 json_str = content.split("```json")[1].split("```")[0].strip()
@@ -94,7 +95,7 @@ async def parse_resumes_with_deepseek_extended(pdf_texts: List[str]) -> Dict[str
             return parsed_resumes
             
     except Exception as e:
-        logger.error(f"Ошибка при парсинге резюме через DeepSeek: {e}")
+        print(f"Ошибка при парсинге резюме через DeepSeek: {e}")
         raise
 
 
@@ -160,7 +161,7 @@ async def analyze_vacancy_requirements(
             return json.loads(json_str)
             
     except Exception as e:
-        logger.error(f"Ошибка при анализе вакансии: {e}")
+        print(f"Ошибка при анализе вакансии: {e}")
         raise
 
 
@@ -239,7 +240,7 @@ async def match_candidate_to_vacancy(
             return match_result
             
     except Exception as e:
-        logger.error(f"Ошибка при сопоставлении кандидата и вакансии: {e}")
+        print(f"Ошибка при сопоставлении кандидата и вакансии: {e}")
         raise
 
 
@@ -302,5 +303,5 @@ async def analyze_interview_answers(
             return soft_skills_score, confidence_score
             
     except Exception as e:
-        logger.error(f"Ошибка при анализе ответов: {e}")
+        print(f"Ошибка при анализе ответов: {e}")
         raise

@@ -624,90 +624,6 @@ async def get_statistics(
 
 
 
-
-# ========== ПРИГЛАШЕНИЕ НА СОБЕСЕДОВАНИЕ ==========
-@router.post('/interview/invite',
-            summary="Приглашение кандидатов на собеседование",
-            description="Отправка email приглашений выбранным кандидатам (только для HR)")
-async def invite_candidates(
-    candidate_ids: List[int] = Form(...),
-    vacancy_id: int = Form(...),
-    current_user: User = Depends(get_current_hr),
-    service: RecruitmentService = Depends(get_service)
-):
-    """
-    Отправка приглашений кандидатам:
-    1. Проверка прав HR
-    2. Создание записей InterviewStage1 для каждого кандидата
-    3. Получение данных кандидатов
-    4. Отправка email с логином/паролем
-    """
-    # Проверяем вакансию
-    vacancy = service.get_vacancy_by_id(vacancy_id)
-    if not vacancy:
-        raise HTTPException(status_code=404, detail="Вакансия не найдена")
-    
-    if vacancy.hr_id != current_user.user_id:
-        raise HTTPException(
-            status_code=403,
-            detail="Вы можете приглашать кандидатов только на свои вакансии"
-        )
-    
-    # Формируем приглашения и создаем записи интервью
-    invitations = []
-    base_url = settings.BASE_URL
-    created_interviews = []
-    
-    for candidate_id in candidate_ids:
-        candidate = service.get_user_by_id(candidate_id)
-        if not candidate or candidate.role != UserRole.CANDIDATE:
-            continue
-        
-        resume = service.get_resume_by_user_id(candidate_id)
-        if not resume:
-            continue
-        
-        # Проверяем, нет ли уже незавершенного интервью для этого кандидата
-        existing_interview = service.get_pending_interview(candidate_id, vacancy_id)
-        
-        if not existing_interview:
-            # Создаем запись в InterviewStage1 (только обязательные поля)
-            try:
-                interview = service.create_interview_stage1_invitation(
-                    candidate_id=candidate_id,
-                    hr_id=current_user.user_id,
-                    vacancy_id=vacancy_id
-                )
-                created_interviews.append(interview.interview1_id)
-                print(f"Создана запись интервью ID={interview.interview1_id} для кандидата {candidate_id}")
-            except Exception as e:
-                print(f"Ошибка создания интервью для кандидата {candidate_id}: {e}")
-                continue
-        else:
-            print(f"Для кандидата {candidate_id} уже существует незавершенное интервью")
-        
-        invitations.append({
-            'email': candidate.email,
-            'full_name': candidate.full_name,
-            'position_title': vacancy.position_title,
-            'vacancy_link': f"{base_url}/vacancies/{vacancy_id}/interview",
-            'login': candidate.login,
-            'password': "Пароль был отправлен при регистрации"
-        })
-    
-    # Отправляем приглашения
-    result = send_bulk_invitations(invitations)
-    
-    return {
-        "message": "Приглашения отправлены",
-        "total_invited": result['total'],
-        "successful_invites": result['success'],
-        "failed_invites": result['failed'],
-        "failed_emails": result['failed_emails'],
-        "created_interviews": len(created_interviews),
-        "interview_ids": created_interviews
-    }
-
 # ========== ПРОХОЖДЕНИЕ ИНТЕРВЬЮ КАНДИДАТОМ ==========
 
 @router.get('/vacancies/{vacancy_id}/interview',
@@ -1099,7 +1015,7 @@ async def bulk_upload_candidates(
                             if text.strip():
                                 pdf_texts.append(text)
                     except Exception as e:
-                        logger.warning(f"Пропущен файл {file_info.filename}: {e}")
+                        print(f"Пропущен файл {file_info.filename}: {e}")
         
         if not pdf_texts:
             raise HTTPException(status_code=400, detail="В архиве нет корректных PDF")
@@ -1122,7 +1038,7 @@ async def bulk_upload_candidates(
                 
                 if existing_user:
                     # Обновляем резюме, если оно устарело
-                    logger.info(f"Кандидат {contact_email} уже существует, обновляем резюме")
+                    print(f"Кандидат {contact_email} уже существует, обновляем резюме")
                     # TODO: добавить логику обновления
                     continue
                 
@@ -1195,7 +1111,7 @@ async def bulk_upload_candidates(
                 })
                 
             except Exception as e:
-                logger.error(f"Ошибка обработки резюме {resume_key}: {e}")
+                print(f"Ошибка обработки резюме {resume_key}: {e}")
                 failed += 1
         
         return {
@@ -1209,7 +1125,7 @@ async def bulk_upload_candidates(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Критическая ошибка при загрузке резюме: {e}")
+        print(f"Критическая ошибка при загрузке резюме: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1264,7 +1180,9 @@ async def create_vacancy_with_matching(
         
         # 3. Получаем всех кандидатов этого HR
         all_candidates = service.get_all_users(role=UserRole.CANDIDATE)
-        hr_candidates = [c for c in all_candidates if c.hr_id == current_user.user_id]
+        hr_candidates = all_candidates
+        print(f'all_candidates{all_candidates}')
+        print(f'hr_candidates{hr_candidates}')
         
         # 4. Анализируем соответствие каждого кандидата
         matches_created = 0
@@ -1272,6 +1190,8 @@ async def create_vacancy_with_matching(
         for candidate in hr_candidates:
             try:
                 resume = service.get_resume_by_user_id(candidate.user_id)
+                print(f'candidate data {candidate}')
+                print(f'resume {resume}')
                 if not resume:
                     continue
                 
@@ -1293,7 +1213,7 @@ async def create_vacancy_with_matching(
                     candidate_resume=candidate_data,
                     vacancy_requirements=vacancy_requirements
                 )
-                
+                print(f'матч резалт {match_result}')
                 # Создаем запись VacancyMatch
                 session = service.db.get_session()
                 try:
@@ -1317,9 +1237,13 @@ async def create_vacancy_with_matching(
                     session.close()
                     
             except Exception as e:
-                logger.error(f"Ошибка при анализе кандидата {candidate.user_id}: {e}")
+                print(f"Ошибка при анализе кандидата {candidate.user_id}: {e}")
                 continue
-        
+        print({"vacancy_id": vacancy.vacancy_id,
+            "position_title": vacancy.position_title,
+            "message": f"Вакансия создана, проанализировано {matches_created} кандидатов",
+            "total_candidates": len(hr_candidates),
+            "matches_created": matches_created})
         return {
             "vacancy_id": vacancy.vacancy_id,
             "position_title": vacancy.position_title,
@@ -1331,7 +1255,7 @@ async def create_vacancy_with_matching(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Ошибка при создании вакансии: {e}")
+        print(f"Ошибка при создании вакансии: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1455,7 +1379,6 @@ async def reject_candidate(
 
 
 # ========== ПРИГЛАШЕНИЕ ОТОБРАННЫХ КАНДИДАТОВ ==========
-
 @router.post('/vacancies/{vacancy_id}/invite_selected',
             summary="Приглашение отобранных кандидатов",
             description="Отправка приглашений только выбранным кандидатам")
@@ -1469,8 +1392,14 @@ async def invite_selected_candidates(
     HR отбирает кандидатов через фильтры и отправляет приглашения только им.
     """
     vacancy = service.get_vacancy_by_id(vacancy_id)
-    if not vacancy or vacancy.hr_id != current_user.user_id:
-        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    if not vacancy:
+        raise HTTPException(status_code=404, detail="Вакансия не найдена")
+    
+    if vacancy.hr_id != current_user.user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Вы можете приглашать кандидатов только на свои вакансии"
+        )
     
     # Логика приглашений (аналогична существующей)
     # + обновление is_invited = 1 в VacancyMatch
@@ -1490,6 +1419,130 @@ async def invite_selected_candidates(
     finally:
         session.close()
     
-    # ... остальная логика отправки email и создания интервью
+        invitations = []
+    base_url = settings.BASE_URL
+    created_interviews = []
+    
+    for candidate_id in candidate_ids:
+        candidate = service.get_user_by_id(candidate_id)
+        if not candidate or candidate.role != UserRole.CANDIDATE:
+            continue
+        
+        resume = service.get_resume_by_user_id(candidate_id)
+        if not resume:
+            continue
+        
+        # Проверяем, нет ли уже незавершенного интервью для этого кандидата
+        existing_interview = service.get_pending_interview(candidate_id, vacancy_id)
+        
+        if not existing_interview:
+            # Создаем запись в InterviewStage1 (только обязательные поля)
+            try:
+                interview = service.create_interview_stage1_invitation(
+                    candidate_id=candidate_id,
+                    hr_id=current_user.user_id,
+                    vacancy_id=vacancy_id
+                )
+                created_interviews.append(interview.interview1_id)
+                print(f"Создана запись интервью ID={interview.interview1_id} для кандидата {candidate_id}")
+            except Exception as e:
+                print(f"Ошибка создания интервью для кандидата {candidate_id}: {e}")
+                continue
+        else:
+            print(f"Для кандидата {candidate_id} уже существует незавершенное интервью")
+        
+        invitations.append({
+            'email': candidate.email,
+            'full_name': candidate.full_name,
+            'position_title': vacancy.position_title,
+            'vacancy_link': f"{base_url}/vacancies/{vacancy_id}/interview",
+            'login': candidate.login,
+            'password': "Пароль был отправлен при регистрации"
+        })
+    
+    # Отправляем приглашения
+    result = send_bulk_invitations(invitations)
     
     return {"message": "Приглашения отправлены", "invited_count": len(candidate_ids)}
+# ========== ПРИГЛАШЕНИЕ НА СОБЕСЕДОВАНИЕ ==========
+@router.post('/interview/invite',
+            summary="Приглашение кандидатов на собеседование",
+            description="Отправка email приглашений выбранным кандидатам (только для HR)")
+async def invite_candidates(
+    candidate_ids: List[int] = Form(...),
+    vacancy_id: int = Form(...),
+    current_user: User = Depends(get_current_hr),
+    service: RecruitmentService = Depends(get_service)
+):
+    """
+    Отправка приглашений кандидатам:
+    1. Проверка прав HR
+    2. Создание записей InterviewStage1 для каждого кандидата
+    3. Получение данных кандидатов
+    4. Отправка email с логином/паролем
+    """
+    # Проверяем вакансию
+    vacancy = service.get_vacancy_by_id(vacancy_id)
+    if not vacancy:
+        raise HTTPException(status_code=404, detail="Вакансия не найдена")
+    
+    if vacancy.hr_id != current_user.user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Вы можете приглашать кандидатов только на свои вакансии"
+        )
+    
+    # Формируем приглашения и создаем записи интервью
+    invitations = []
+    base_url = settings.BASE_URL
+    created_interviews = []
+    
+    for candidate_id in candidate_ids:
+        candidate = service.get_user_by_id(candidate_id)
+        if not candidate or candidate.role != UserRole.CANDIDATE:
+            continue
+        
+        resume = service.get_resume_by_user_id(candidate_id)
+        if not resume:
+            continue
+        
+        # Проверяем, нет ли уже незавершенного интервью для этого кандидата
+        existing_interview = service.get_pending_interview(candidate_id, vacancy_id)
+        
+        if not existing_interview:
+            # Создаем запись в InterviewStage1 (только обязательные поля)
+            try:
+                interview = service.create_interview_stage1_invitation(
+                    candidate_id=candidate_id,
+                    hr_id=current_user.user_id,
+                    vacancy_id=vacancy_id
+                )
+                created_interviews.append(interview.interview1_id)
+                print(f"Создана запись интервью ID={interview.interview1_id} для кандидата {candidate_id}")
+            except Exception as e:
+                print(f"Ошибка создания интервью для кандидата {candidate_id}: {e}")
+                continue
+        else:
+            print(f"Для кандидата {candidate_id} уже существует незавершенное интервью")
+        
+        invitations.append({
+            'email': candidate.email,
+            'full_name': candidate.full_name,
+            'position_title': vacancy.position_title,
+            'vacancy_link': f"{base_url}/vacancies/{vacancy_id}/interview",
+            'login': candidate.login,
+            'password': "Пароль был отправлен при регистрации"
+        })
+    
+    # Отправляем приглашения
+    result = send_bulk_invitations(invitations)
+    
+    return {
+        "message": "Приглашения отправлены",
+        "total_invited": result['total'],
+        "successful_invites": result['success'],
+        "failed_invites": result['failed'],
+        "failed_emails": result['failed_emails'],
+        "created_interviews": len(created_interviews),
+        "interview_ids": created_interviews
+    }
