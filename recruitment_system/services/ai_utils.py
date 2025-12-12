@@ -12,91 +12,96 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY_3")
 
+async def parse_chunk_with_deepseek(chunk: List[str]) -> Dict[str, Dict]:
+    prompt = f"""НИКАКИХ дополнительных сообщений не требуется.
+Твоя задача - детально проанализировать {len(chunk)} резюме и извлечь максимум информации для AI-анализа.
+
+Верни JSON в формате:
+{{ "resume1": {{ "full_name": "...", "contact_email": "...", "contact_phone": "...", "birth_date": "YYYY-MM-DD" или null, "education": "текстовое описание образования", "work_experience": "текстовое описание опыта", "skills": "общее описание навыков", "technical_skills": ["Python", "FastAPI", "PostgreSQL", ...], "soft_skills": ["Командная работа", "Коммуникабельность", ...], "languages": [{{"language": "Английский", "level": "B2"}}, ...], "certifications": ["AWS Certified", "IELTS 7.0", ...], "projects": [ {{"name": "Название проекта", "description": "Краткое описание", "technologies": ["tech1", "tech2"]}}, ... ], "desired_position": "Backend Developer" или null, "desired_salary": 150000 или null, "experience_years": 5, "ai_summary": "Краткая сводка кандидата в 2-3 предложениях", "ai_strengths": ["Сильная сторона 1", "Сильная сторона 2", ...], "ai_weaknesses": ["Слабая сторона 1", "Слабая сторона 2", ...] }}, "resume2": {{ ... }} }}
+
+Если какое-то поле отсутствует — используй null или [].
+
+Тексты резюме:
+{chr(10).join([f"=== РЕЗЮМЕ {i+1} ==={chr(10)}{text}" for i, text in enumerate(chunk)])}
+"""
+
+    async with httpx.AsyncClient(timeout=180.0) as client:
+        response = await client.post(
+            DEEPSEEK_API_URL,
+            headers={
+                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            data=json.dumps({
+                "model": "tngtech/deepseek-r1t2-chimera:free",
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ]
+            })
+        )
+
+        response.raise_for_status()
+        print(DEEPSEEK_API_KEY)
+
+        result = response.json()
+        content = result["choices"][0]["message"]["content"]
+
+        # Извлечение JSON
+        if "```json" in content:
+            json_str = content.split("```json")[1].split("```")[0].strip()
+        else:
+            json_str = content.strip()
+
+        return json.loads(json_str)
+
+import asyncio
 
 async def parse_resumes_with_deepseek_extended(pdf_texts: List[str]) -> Dict[str, Dict]:
     """
-    Расширенный парсинг резюме через DeepSeek с извлечением детальной информации.
-    
-    Args:
-        pdf_texts: Список текстов PDF файлов
-    
-    Returns:
-        Словарь с подробно распарсенными резюме
+    Расширенный парсинг через DeepSeek с автоматическим делением
+    на чанки, параллельной обработкой и сборкой результатов.
     """
-    prompt = f"""НИКАКИХ дополнительных сообщений не требуется.
-Твоя задача - детально проанализировать {len(pdf_texts)} резюме и извлечь максимум информации для AI-анализа.
 
-Верни JSON в формате:
-{{
-  "resume1": {{
-    "full_name": "...",
-    "contact_email": "...",
-    "contact_phone": "...",
-    "birth_date": "YYYY-MM-DD" или null,
-    
-    "education": "текстовое описание образования",
-    "work_experience": "текстовое описание опыта",
-    "skills": "общее описание навыков",
-    
-    "technical_skills": ["Python", "FastAPI", "PostgreSQL", ...],
-    "soft_skills": ["Командная работа", "Коммуникабельность", ...],
-    "languages": [{{"language": "Английский", "level": "B2"}}, ...],
-    "certifications": ["AWS Certified", "IELTS 7.0", ...],
-    "projects": [
-      {{"name": "Название проекта", "description": "Краткое описание", "technologies": ["tech1", "tech2"]}},
-      ...
-    ],
-    "desired_position": "Backend Developer" или null,
-    "desired_salary": 150000 или null,
-    "experience_years": 5,
-    
-    "ai_summary": "Краткая сводка кандидата в 2-3 предложениях",
-    "ai_strengths": ["Сильная сторона 1", "Сильная сторона 2", ...],
-    "ai_weaknesses": ["Слабая сторона 1", "Слабая сторона 2", ...]
-  }},
-  "resume2": {{ ... }}
-}}
+    CHUNK_SIZE = 5  # сколько резюме отправляется в один запрос
 
-Если какое-то поле отсутствует, используй null или пустой массив [].
+    # делим pdf_texts на чанки по 10 резюме
+    chunks = [
+        pdf_texts[i:i + CHUNK_SIZE]
+        for i in range(0, len(pdf_texts), CHUNK_SIZE)
+    ]
+    print(f"Deepeseek api key {DEEPSEEK_API_KEY}")
+    print(f"Разбиваем на {len(chunks)} чанков")
+    print(f"Deepeseek api key {DEEPSEEK_API_KEY}")
 
-Тексты резюме:
-{chr(10).join([f"=== РЕЗЮМЕ {i+1} ==={chr(10)}{text}" for i, text in enumerate(pdf_texts)])}
-"""
-    
-    try:
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            response = await client.post(
-                DEEPSEEK_API_URL,
-                headers={
-                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                data=json.dumps({
-                    "model": "tngtech/deepseek-r1t2-chimera:free",
-                    "messages": [
-                        {"role": "user", "content": prompt}
-                    ]
-                })
-            )
-            response.raise_for_status()
-            result = response.json()
-            content = result["choices"][0]["message"]["content"]
-            print(response.status_code)
-            print(content)
-            # Извлекаем JSON
-            if "```json" in content:
-                json_str = content.split("```json")[1].split("```")[0].strip()
-            else:
-                json_str = content.strip()
+    # создаём задачи на параллельные запросы
+    tasks = [
+        parse_chunk_with_deepseek(chunk)
+        for chunk in chunks
+    ]
 
-            parsed_resumes = json.loads(json_str)
-            return parsed_resumes
-            
-    except Exception as e:
-        print(f"Ошибка при парсинге резюме через DeepSeek: {e}")
-        raise
+    # параллельная обработка (асинхронная)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    merged: Dict[str, Dict] = {}
+    resume_counter = 1
+
+    print(f"Deepeseek api key {DEEPSEEK_API_KEY}")
+
+    # собираем информацию обратно в единый словарь
+    for result_index, result in enumerate(results):
+        if isinstance(result, Exception):
+            print(f"Ошибка в чанке {result_index}: {result}")
+            continue
+
+        for _, resume_data in result.items():
+            merged[f"resume{resume_counter}"] = resume_data
+            resume_counter += 1
+
+    return merged
+
+
 
 
 async def analyze_vacancy_requirements(
