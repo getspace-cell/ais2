@@ -1,6 +1,6 @@
 # ============================================================================
-# ФАЙЛ: models/dao.py (ОБНОВЛЕННЫЙ)
-# Описание: Объектно-реляционное отображение с оценками пригодности
+# ФАЙЛ: models/dao.py (ИСПРАВЛЕННЫЙ)
+# Описание: Объектно-реляционное отображение с детерминированными оценками
 # ============================================================================
 
 from datetime import datetime
@@ -46,17 +46,23 @@ class User(Base):
     role = Column(SQLEnum(UserRole), nullable=False)
     registration_date = Column(DateTime, default=datetime.utcnow)
     
+    # Связь с HR, который загрузил кандидата
+    hr_id = Column(Integer, ForeignKey('users.user_id'), nullable=True, comment="HR который загрузил резюме")
+    
     # Отношения
     resume = relationship("Resume", back_populates="user", uselist=False, cascade="all, delete-orphan")
     hr_company_info = relationship("HRCompanyInfo", back_populates="hr", uselist=False, cascade="all, delete-orphan")
     
-    # Новое: связь с HR, который загрузил кандидата
-    hr_id = Column(Integer, ForeignKey('users.user_id'), nullable=True, comment="HR который загрузил резюме")
+    # Связь HR с управляемыми кандидатами
     hr = relationship("User", remote_side=[user_id], foreign_keys=[hr_id], backref="managed_candidates")
     
+    # Вакансии
     vacancies = relationship("Vacancy", back_populates="hr", cascade="all, delete-orphan")
+    
+    # Соответствия вакансиям
     vacancy_matches = relationship("VacancyMatch", back_populates="candidate", cascade="all, delete-orphan")
     
+    # Интервью
     interviews_stage1_as_candidate = relationship(
         "InterviewStage1", 
         foreign_keys="InterviewStage1.candidate_id",
@@ -81,6 +87,8 @@ class User(Base):
         back_populates="hr",
         cascade="all, delete-orphan"
     )
+    
+    # Отчеты
     reports_as_candidate = relationship(
         "CandidateReport",
         foreign_keys="CandidateReport.candidate_id",
@@ -134,7 +142,7 @@ class HRCompanyInfo(Base):
 
 class Resume(Base):
     """
-    Резюме кандидата с расширенной информацией для AI анализа.
+    Резюме кандидата с расширенной информацией для анализа.
     """
     __tablename__ = 'resumes'
 
@@ -151,7 +159,7 @@ class Resume(Base):
     work_experience = Column(Text)
     skills = Column(Text)
     
-    # НОВОЕ: Расширенная информация для анализа
+    # РАСШИРЕННАЯ информация для анализа
     technical_skills = Column(JSON, comment="Список технических навыков")
     soft_skills = Column(JSON, comment="Список soft skills")
     languages = Column(JSON, comment="Языки и уровень владения")
@@ -161,7 +169,7 @@ class Resume(Base):
     desired_salary = Column(Integer, comment="Желаемая зарплата")
     experience_years = Column(Integer, comment="Годы опыта")
     
-    # AI анализ резюме
+    # AI анализ резюме (для справки)
     ai_summary = Column(Text, comment="Краткая сводка от AI")
     ai_strengths = Column(JSON, comment="Сильные стороны по мнению AI")
     ai_weaknesses = Column(JSON, comment="Слабые стороны по мнению AI")
@@ -176,38 +184,55 @@ class Resume(Base):
 
 
 # ============================================================================
-# ВАКАНСИИ (РАСШИРЕННЫЕ)
+# ВАКАНСИИ (С КРИТЕРИЯМИ)
 # ============================================================================
 
 class Vacancy(Base):
     """
-    Вакансия с требованиями для AI анализа пригодности кандидатов.
+    Вакансия с детерминированными критериями отбора.
     """
     __tablename__ = 'vacancies'
 
     vacancy_id = Column(Integer, primary_key=True, autoincrement=True)
     hr_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
     
+    # Базовая информация
     position_title = Column(String(100), nullable=False)
     job_description = Column(Text)
     requirements = Column(Text)
-    
-    # НОВОЕ: Структурированные требования для AI
-    required_technical_skills = Column(JSON, comment="Обязательные технические навыки")
-    optional_technical_skills = Column(JSON, comment="Желательные технические навыки")
-    required_soft_skills = Column(JSON, comment="Обязательные soft skills")
-    required_experience_years = Column(Integer, comment="Минимальный опыт работы")
-    required_languages = Column(JSON, comment="Требуемые языки")
-    salary_range = Column(JSON, comment="Вилка зарплаты {min, max}")
-    
     questions = Column(JSON, nullable=True, comment="Список вопросов для собеседования")
     status = Column(SQLEnum(VacancyStatus), default=VacancyStatus.OPEN)
     
+    # КРИТЕРИИ ОТБОРА
+    min_experience_years = Column(Integer, default=0, comment="Минимальный опыт (лет)")
+    max_experience_years = Column(Integer, nullable=True, comment="Максимальный опыт (лет)")
+    min_age = Column(Integer, nullable=True, comment="Минимальный возраст")
+    max_age = Column(Integer, nullable=True, comment="Максимальный возраст")
+    education_required = Column(Integer, default=0, comment="Требуется ли высшее образование (0/1)")
+    education_level = Column(String(50), nullable=True, comment="Уровень: Бакалавр/Магистр/Специалист")
+    
+    required_technical_skills = Column(JSON, comment="Обязательные технические навыки")
+    optional_technical_skills = Column(JSON, comment="Желательные технические навыки")
+    required_soft_skills = Column(JSON, comment="Обязательные soft skills")
+    required_languages = Column(JSON, comment='[{"language": "...", "min_level": "B2"}]')
+    
+    min_salary = Column(Integer, nullable=True, comment="Минимальная зарплата")
+    max_salary = Column(Integer, nullable=True, comment="Максимальная зарплата")
+    
+    # Веса для расчета скора
+    weight_experience = Column(Integer, default=30, comment="Вес опыта в скоре %")
+    weight_technical_skills = Column(Integer, default=40, comment="Вес технических навыков %")
+    weight_soft_skills = Column(Integer, default=20, comment="Вес soft skills %")
+    weight_languages = Column(Integer, default=10, comment="Вес языков %")
+    
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Отношения
     hr = relationship("User", back_populates="vacancies")
     matches = relationship("VacancyMatch", back_populates="vacancy", cascade="all, delete-orphan")
-    interviews_stage1 = relationship("InterviewStage1", back_populates="vacancy", cascade="all, delete-orphan")
+    
+    # ИСПРАВЛЕНО: используем правильные имена relationships
+    interviews_as_vacancy = relationship("InterviewStage1", back_populates="vacancy", cascade="all, delete-orphan")
     interviews_stage2 = relationship("InterviewStage2", back_populates="vacancy", cascade="all, delete-orphan")
     reports = relationship("CandidateReport", back_populates="vacancy", cascade="all, delete-orphan")
 
@@ -216,13 +241,12 @@ class Vacancy(Base):
 
 
 # ============================================================================
-# НОВАЯ ТАБЛИЦА: СООТВЕТСТВИЕ КАНДИДАТОВ ВАКАНСИЯМ
+# СООТВЕТСТВИЕ КАНДИДАТОВ ВАКАНСИЯМ
 # ============================================================================
 
 class VacancyMatch(Base):
     """
-    Оценка соответствия кандидата вакансии.
-    Автоматически создается при создании вакансии для всех кандидатов HR.
+    Детерминированная оценка соответствия кандидата вакансии.
     """
     __tablename__ = 'vacancy_matches'
     __table_args__ = (
@@ -234,21 +258,28 @@ class VacancyMatch(Base):
     candidate_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
     
     # Оценки соответствия (0-100)
-    overall_score = Column(Float, nullable=False, comment="Общая оценка пригодности 0-100")
-    technical_match_score = Column(Float, comment="Соответствие технических навыков")
-    experience_match_score = Column(Float, comment="Соответствие опыта")
-    soft_skills_match_score = Column(Float, comment="Соответствие soft skills")
+    overall_score = Column(Integer, nullable=False, comment="Общая оценка 0-100")
+    experience_score = Column(Integer, comment="Оценка опыта 0-100")
+    technical_skills_score = Column(Integer, comment="Оценка технических навыков 0-100")
+    soft_skills_score = Column(Integer, comment="Оценка soft skills 0-100")
+    language_score = Column(Integer, comment="Оценка языков 0-100")
+    education_score = Column(Integer, comment="Соответствие образованию 0-100")
+    age_score = Column(Integer, comment="Соответствие возрасту 0-100")
     
-    # Детальный анализ
-    matched_skills = Column(JSON, comment="Совпадающие навыки")
-    missing_skills = Column(JSON, comment="Недостающие навыки")
-    ai_recommendation = Column(Text, comment="Рекомендация AI")
-    ai_pros = Column(JSON, comment="Преимущества кандидата")
-    ai_cons = Column(JSON, comment="Недостатки кандидата")
+    # Детали совпадений
+    matched_technical_skills = Column(JSON, comment="Совпавшие технические навыки")
+    missing_technical_skills = Column(JSON, comment="Отсутствующие технические навыки")
+    matched_soft_skills = Column(JSON, comment="Совпавшие soft skills")
+    matched_languages = Column(JSON, comment="Совпавшие языки")
     
-    # Статус отбора
-    is_invited = Column(Integer, default=0, comment="Приглашен ли на интервью (0/1)")
-    is_rejected = Column(Integer, default=0, comment="Отклонен ли HR (0/1)")
+    # AI-анализ (для справки HR)
+    ai_summary = Column(Text, comment="Краткая сводка от AI (из резюме)")
+    ai_strengths = Column(JSON, comment="Сильные стороны (из резюме)")
+    ai_weaknesses = Column(JSON, comment="Слабые стороны (из резюме)")
+    
+    # Статус
+    is_invited = Column(Integer, default=0, comment="Приглашен на интервью (0/1)")
+    is_rejected = Column(Integer, default=0, comment="Отклонен HR (0/1)")
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -261,7 +292,7 @@ class VacancyMatch(Base):
 
 
 # ============================================================================
-# СОБЕСЕДОВАНИЯ (БЕЗ ИЗМЕНЕНИЙ)
+# СОБЕСЕДОВАНИЯ
 # ============================================================================
 
 class InterviewStage1(Base):
@@ -285,7 +316,7 @@ class InterviewStage1(Base):
 
     candidate = relationship("User", foreign_keys=[candidate_id], back_populates="interviews_stage1_as_candidate")
     hr = relationship("User", foreign_keys=[hr_id], back_populates="interviews_stage1_as_hr")
-    vacancy = relationship("Vacancy", back_populates="interviews_stage1")
+    vacancy = relationship("Vacancy", back_populates="interviews_as_vacancy")
     stage2 = relationship("InterviewStage2", back_populates="stage1", uselist=False, cascade="all, delete-orphan")
     reports = relationship("CandidateReport", back_populates="interview1")
 
@@ -321,7 +352,7 @@ class InterviewStage2(Base):
 
 
 # ============================================================================
-# ОТЧЕТЫ (БЕЗ ИЗМЕНЕНИЙ)
+# ОТЧЕТЫ
 # ============================================================================
 
 class CandidateReport(Base):

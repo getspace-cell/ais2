@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY_2: str = ""
     DEEPSEEK_API_KEY_3: str = ""
     DEEPSEEK_API_KEY_4: str = ""
-
+    PROXIES: str
     
     # OpenAI Whisper (Speech-to-Text)
     OPENAI_API_KEY: str = ""

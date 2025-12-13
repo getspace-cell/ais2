@@ -673,3 +673,189 @@ class BulkUploadResponseDTO(BaseModel):
                 ]
             }
         }
+
+"""
+DTO для создания вакансии с детерминированными критериями
+"""
+from pydantic import BaseModel, Field, validator
+from typing import List, Optional
+
+
+class LanguageRequirementDTO(BaseModel):
+    """Требование к языку"""
+    language: str = Field(..., description="Название языка")
+    min_level: str = Field(..., description="Минимальный уровень: A1, A2, B1, B2, C1, C2")
+    
+    @validator('min_level')
+    def validate_level(cls, v):
+        valid_levels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
+        if v not in valid_levels:
+            raise ValueError(f'Уровень должен быть одним из: {valid_levels}')
+        return v
+
+
+class VacancyCreateWithCriteriaDTO(BaseModel):
+    """DTO для создания вакансии с критериями отбора"""
+    
+    # Базовая информация
+    position_title: str = Field(..., min_length=2, max_length=100)
+    job_description: Optional[str] = None
+    requirements: Optional[str] = None
+    questions: Optional[List[str]] = None
+    
+    # ========== КРИТЕРИИ ОТБОРА ==========
+    
+    # Опыт работы (лет)
+    min_experience_years: int = Field(default=0, ge=0, le=50, description="Минимальный опыт работы")
+    max_experience_years: Optional[int] = Field(None, ge=0, le=50, description="Максимальный опыт работы")
+    
+    # Возраст
+    min_age: Optional[int] = Field(None, ge=18, le=70, description="Минимальный возраст")
+    max_age: Optional[int] = Field(None, ge=18, le=70, description="Максимальный возраст")
+    
+    # Образование
+    education_required: bool = Field(default=False, description="Требуется ли высшее образование")
+    education_level: Optional[str] = Field(
+        None, 
+        description="Уровень образования: Бакалавр, Магистр, Специалист"
+    )
+    
+    # Технические навыки
+    required_technical_skills: List[str] = Field(
+        default=[], 
+        description="Обязательные технические навыки"
+    )
+    optional_technical_skills: List[str] = Field(
+        default=[], 
+        description="Желательные технические навыки (дают бонус к скору)"
+    )
+    
+    # Soft skills
+    required_soft_skills: List[str] = Field(
+        default=[], 
+        description="Обязательные soft skills"
+    )
+    
+    # Языки
+    required_languages: List[LanguageRequirementDTO] = Field(
+        default=[],
+        description="Требования к языкам"
+    )
+    
+    # Зарплата
+    min_salary: Optional[int] = Field(None, ge=0, description="Минимальная зарплата")
+    max_salary: Optional[int] = Field(None, ge=0, description="Максимальная зарплата")
+    
+    # Веса критериев (опционально, по умолчанию используются стандартные)
+    weight_experience: int = Field(default=30, ge=0, le=100, description="Вес опыта в общем скоре %")
+    weight_technical_skills: int = Field(default=40, ge=0, le=100, description="Вес технических навыков %")
+    weight_soft_skills: int = Field(default=20, ge=0, le=100, description="Вес soft skills %")
+    weight_languages: int = Field(default=10, ge=0, le=100, description="Вес языков %")
+    
+    @validator('max_experience_years')
+    def validate_experience_range(cls, v, values):
+        if v is not None and 'min_experience_years' in values:
+            if v < values['min_experience_years']:
+                raise ValueError('Максимальный опыт не может быть меньше минимального')
+        return v
+    
+    @validator('max_age')
+    def validate_age_range(cls, v, values):
+        if v is not None and 'min_age' in values and values['min_age'] is not None:
+            if v < values['min_age']:
+                raise ValueError('Максимальный возраст не может быть меньше минимального')
+        return v
+    
+    @validator('max_salary')
+    def validate_salary_range(cls, v, values):
+        if v is not None and 'min_salary' in values and values['min_salary'] is not None:
+            if v < values['min_salary']:
+                raise ValueError('Максимальная зарплата не может быть меньше минимальной')
+        return v
+    
+    @validator('weight_languages')
+    def validate_weights_sum(cls, v, values):
+        total = (
+            values.get('weight_experience', 30) +
+            values.get('weight_technical_skills', 40) +
+            values.get('weight_soft_skills', 20) +
+            v
+        )
+        if total != 100:
+            raise ValueError(f'Сумма весов должна быть 100%, сейчас: {total}%')
+        return v
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "position_title": "Senior Python Developer",
+                "job_description": "Разработка backend на Python/FastAPI",
+                "requirements": "Опыт с микросервисами и высоконагруженными системами",
+                "questions": ["Опыт работы с FastAPI?", "Расскажите о вашем подходе к тестированию"],
+                
+                "min_experience_years": 3,
+                "max_experience_years": 10,
+                
+                "min_age": 25,
+                "max_age": 45,
+                
+                "education_required": True,
+                "education_level": "Бакалавр",
+                
+                "required_technical_skills": ["Python", "FastAPI", "PostgreSQL", "Docker"],
+                "optional_technical_skills": ["Kubernetes", "Redis", "RabbitMQ"],
+                
+                "required_soft_skills": ["Командная работа", "Коммуникабельность"],
+                
+                "required_languages": [
+                    {"language": "Английский", "min_level": "B2"}
+                ],
+                
+                "min_salary": 150000,
+                "max_salary": 300000,
+                
+                "weight_experience": 30,
+                "weight_technical_skills": 40,
+                "weight_soft_skills": 20,
+                "weight_languages": 10
+            }
+        }
+
+
+class VacancyMatchResponseDTO(BaseModel):
+    """Детальный ответ о соответствии кандидата"""
+    match_id: int
+    vacancy_id: int
+    candidate_id: int
+    candidate_name: str
+    
+    # Общая оценка
+    overall_score: int = Field(..., description="Общая оценка 0-100")
+    
+    # Детальные оценки
+    experience_score: int
+    technical_skills_score: int
+    soft_skills_score: int
+    language_score: int
+    education_score: int
+    age_score: int
+    
+    # Совпадения
+    matched_technical_skills: List[str]
+    missing_technical_skills: List[str]
+    matched_soft_skills: List[str]
+    matched_languages: List[str]
+    
+    # AI-анализ (для справки)
+    ai_summary: Optional[str]
+    ai_strengths: List[str]
+    ai_weaknesses: List[str]
+    
+    # Статус
+    is_invited: int
+    is_rejected: int
+    
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
