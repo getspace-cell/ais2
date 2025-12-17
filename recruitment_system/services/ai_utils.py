@@ -12,7 +12,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY_3")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
 async def parse_chunk_with_deepseek(chunk: List[str]) -> Dict[str, Dict]:
     prompt = f"""НИКАКИХ дополнительных сообщений не требуется.

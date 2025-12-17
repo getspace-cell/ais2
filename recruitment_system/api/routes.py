@@ -980,20 +980,6 @@ async def get_all_companies(
         
 # ========== МАССОВАЯ ЗАГРУЗКА РЕЗЮМЕ В БАЗУ HR ==========
 
-# Добавьте эти импорты в начало вашего routes.py
-
-# ЗАМЕНИТЕ импорт:
-# from services.ai_utils import ...
-# НА:
-from services.ai_utils_parallel import (
-    parse_resumes_with_deepseek_parallel,
-    match_candidates_to_vacancy_parallel,
-    analyze_vacancy_requirements,
-    analyze_interview_answers
-)
-
-
-# ========== ОБНОВЛЕННЫЙ РОУТ: МАССОВАЯ ЗАГРУЗКА РЕЗЮМЕ ==========
 
 @router.post('/hr/candidates/bulk_upload',
             summary="Массовая загрузка резюме в базу HR (ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА)",
@@ -1044,11 +1030,8 @@ async def bulk_upload_candidates(
         # ПАРАЛЛЕЛЬНАЯ обработка через DeepSeek
         # batch_size=4 - по 4 резюме в запросе
         # max_concurrent=10 - до 10 параллельных запросов
-        parsed_resumes = await parse_resumes_with_deepseek_parallel(
-            pdf_texts,
-            batch_size=4,
-            max_concurrent=2
-        )
+        parsed_resumes = await parse_resumes_with_deepseek_extended(
+            pdf_texts,)
         
         print(f"DeepSeek обработал {len(parsed_resumes)} резюме")
         
@@ -1152,7 +1135,6 @@ async def bulk_upload_candidates(
                 "total_pdfs": len(pdf_texts),
                 "deepseek_parsed": len(parsed_resumes),
                 "parallel_batches": (len(pdf_texts) + 3) // 4,  # количество батчей
-                "api_keys_used": len(API_KEYS)
             }
         }
         
@@ -1163,166 +1145,6 @@ async def bulk_upload_candidates(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ========== ОБНОВЛЕННЫЙ РОУТ: СОЗДАНИЕ ВАКАНСИИ С СОПОСТАВЛЕНИЕМ ==========
-
-@router.post('/vacancies/create_with_matching',
-            summary="Создание вакансии с параллельным анализом кандидатов",
-            description="Создает вакансию и параллельно оценивает всех кандидатов HR")
-async def create_vacancy_with_matching(
-    vacancy_data: VacancyCreateExtendedDTO,
-    current_user: User = Depends(get_current_hr),
-    service: RecruitmentService = Depends(get_service)
-):
-    """
-    Улучшенный workflow с параллельной обработкой:
-    1. Создание вакансии
-    2. Анализ требований вакансии через DeepSeek
-    3. Получение всех кандидатов HR
-    4. ПАРАЛЛЕЛЬНОЕ сопоставление кандидатов батчами по 4 штуки
-    5. Создание записей VacancyMatch
-    """
-    try:
-        # 1. Анализируем требования вакансии
-        vacancy_requirements = await analyze_vacancy_requirements(
-            position_title=vacancy_data.position_title,
-            job_description=vacancy_data.job_description or "",
-            requirements=vacancy_data.requirements or ""
-        )
-        
-        # 2. Создаем вакансию с структурированными требованиями
-        vacancy = service.create_vacancy(
-            hr_id=current_user.user_id,
-            position_title=vacancy_data.position_title,
-            job_description=vacancy_data.job_description,
-            requirements=vacancy_data.requirements,
-            questions=vacancy_data.questions,
-            status=VacancyStatus.OPEN
-        )
-        
-        # Сохраняем структурированные требования
-        session = service.db.get_session()
-        try:
-            vacancy.required_technical_skills = vacancy_requirements.get('required_technical_skills', [])
-            vacancy.optional_technical_skills = vacancy_requirements.get('optional_technical_skills', [])
-            vacancy.required_soft_skills = vacancy_requirements.get('required_soft_skills', [])
-            vacancy.required_experience_years = vacancy_requirements.get('required_experience_years')
-            vacancy.required_languages = vacancy_requirements.get('required_languages', [])
-            vacancy.salary_range = vacancy_requirements.get('salary_range')
-            session.commit()
-        finally:
-            session.close()
-        
-        # 3. Получаем всех кандидатов этого HR
-        all_candidates = service.get_all_users(role=UserRole.CANDIDATE)
-        
-        # Фильтруем только кандидатов этого HR (если есть hr_id)
-        hr_candidates = [c for c in all_candidates if c.hr_id == current_user.user_id]
-        
-        if not hr_candidates:
-            print(f"У HR {current_user.user_id} нет кандидатов для анализа")
-            return {
-                "vacancy_id": vacancy.vacancy_id,
-                "position_title": vacancy.position_title,
-                "message": "Вакансия создана, но нет кандидатов для анализа",
-                "total_candidates": 0,
-                "matches_created": 0
-            }
-        
-        print(f"Найдено {len(hr_candidates)} кандидатов HR для анализа")
-        
-        # 4. Подготавливаем данные для параллельного сопоставления
-        candidates_data = []
-        
-        for candidate in hr_candidates:
-            try:
-                resume = service.get_resume_by_user_id(candidate.user_id)
-                if not resume:
-                    print(f"У кандидата {candidate.user_id} нет резюме, пропускаем")
-                    continue
-                
-                candidate_data = {
-                    "full_name": candidate.full_name,
-                    "technical_skills": resume.technical_skills or [],
-                    "soft_skills": resume.soft_skills or [],
-                    "experience_years": resume.experience_years or 0,
-                    "languages": resume.languages or [],
-                    "education": resume.education,
-                    "work_experience": resume.work_experience,
-                    "projects": resume.projects or [],
-                    "desired_position": resume.desired_position
-                }
-                
-                candidates_data.append((candidate.user_id, candidate_data))
-                
-            except Exception as e:
-                print(f"Ошибка при подготовке данных кандидата {candidate.user_id}: {e}")
-                continue
-        
-        print(f"Подготовлено {len(candidates_data)} кандидатов для сопоставления")
-        
-        # 5. ПАРАЛЛЕЛЬНОЕ сопоставление через DeepSeek
-        match_results = await match_candidates_to_vacancy_parallel(
-            candidates_data,
-            vacancy_requirements,
-            batch_size=4,
-            max_concurrent=10
-        )
-        
-        print(f"DeepSeek вернул {len(match_results)} результатов сопоставления")
-        
-        # 6. Создаем записи VacancyMatch
-        matches_created = 0
-        
-        for candidate_id, match_result in match_results:
-            try:
-                session = service.db.get_session()
-                try:
-                    vacancy_match = VacancyMatch(
-                        vacancy_id=vacancy.vacancy_id,
-                        candidate_id=candidate_id,
-                        overall_score=match_result['overall_score'],
-                        technical_match_score=match_result.get('technical_match_score'),
-                        experience_match_score=match_result.get('experience_match_score'),
-                        soft_skills_match_score=match_result.get('soft_skills_match_score'),
-                        matched_skills=match_result.get('matched_skills', []),
-                        missing_skills=match_result.get('missing_skills', []),
-                        ai_recommendation=match_result.get('ai_recommendation'),
-                        ai_pros=match_result.get('ai_pros', []),
-                        ai_cons=match_result.get('ai_cons', [])
-                    )
-                    session.add(vacancy_match)
-                    session.commit()
-                    matches_created += 1
-                finally:
-                    session.close()
-                    
-            except Exception as e:
-                print(f"Ошибка при создании VacancyMatch для кандидата {candidate_id}: {e}")
-                continue
-        
-        return {
-            "vacancy_id": vacancy.vacancy_id,
-            "position_title": vacancy.position_title,
-            "message": f"Вакансия создана, проанализировано {matches_created} кандидатов",
-            "total_candidates": len(hr_candidates),
-            "candidates_with_resumes": len(candidates_data),
-            "matches_created": matches_created,
-            "processing_info": {
-                "parallel_batches": (len(candidates_data) + 3) // 4,
-                "api_keys_used": len(API_KEYS)
-            }
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Ошибка при создании вакансии с сопоставлением: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ВАЖНО: Добавьте этот импорт в начало файла
-from services.ai_utils_parallel import API_KEYS
-from models.dao import VacancyMatch
 # ========== ПОЛУЧЕНИЕ КАНДИДАТОВ С ФИЛЬТРАЦИЕЙ ==========
 
 @router.post('/vacancies/{vacancy_id}/candidates/filtered',
@@ -1740,16 +1562,19 @@ async def create_vacancy_with_criteria(
                 print(f"  ✗ Ошибка при анализе кандидата {candidate.user_id}: {e}")
                 continue
         
-        session.commit()
-        session.close()
         
         print(f"✓ Создано {matches_created} записей VacancyMatch")
-        
+        vacancy_id = vacancy.vacancy_id
+        position_title = vacancy.position_title
+        message = matches_created
+        total_candidates = len(hr_candidates)
+        matches_created = matches_created
+
         return {
-            "vacancy_id": vacancy.vacancy_id,
-            "position_title": vacancy.position_title,
-            "message": f"Вакансия создана, проанализировано {matches_created} кандидатов (детерминированный алгоритм)",
-            "total_candidates": len(hr_candidates),
+            "vacancy_id": vacancy_id,
+            "position_title": position_title,
+            "message": f"Вакансия создана, проанализировано {message} кандидатов (детерминированный алгоритм)",
+            "total_candidates": total_candidates,
             "matches_created": matches_created,
             "algorithm": "deterministic"  # Указываем что использовали детерминированный алгоритм
         }
