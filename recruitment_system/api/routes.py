@@ -1505,7 +1505,6 @@ async def create_vacancy_with_criteria(
         # 2. Получаем всех кандидатов этого HR
         hr_candidates = session.query(User).filter(
             User.role == UserRole.CANDIDATE,
-            User.hr_id == current_user.user_id
         ).all()
         
         print(f"✓ Найдено {len(hr_candidates)} кандидатов HR")
@@ -1554,6 +1553,8 @@ async def create_vacancy_with_criteria(
                 )
                 
                 session.add(vacancy_match)
+                session.commit()
+                session.refresh(vacancy)
                 matches_created += 1
                 
                 print(f"  ✓ Кандидат {candidate.full_name}: {match_result['overall_score']}/100")
@@ -1620,11 +1621,7 @@ async def get_filtered_candidates(
             VacancyMatch.experience_score >= min_experience_score
         )
         
-        if hide_rejected:
-            query = query.filter(VacancyMatch.is_rejected == 0)
-        
-        if hide_invited:
-            query = query.filter(VacancyMatch.is_invited == 0)
+
         
         # Сортировка
         if sort_desc:
