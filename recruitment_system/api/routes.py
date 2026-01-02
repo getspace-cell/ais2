@@ -981,6 +981,11 @@ async def get_all_companies(
 # ========== МАССОВАЯ ЗАГРУЗКА РЕЗЮМЕ В БАЗУ HR ==========
 
 
+# Добавьте этот импорт в начало файла routes.py (если его там нет)
+from services.email_utils import mass_reg_info, send_bulk_invitations
+
+# Замените существующий роутер на этот исправленный вариант:
+
 @router.post('/hr/candidates/bulk_upload',
             summary="Массовая загрузка резюме в базу HR (ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА)",
             description="Загрузка ZIP с PDF, параллельный парсинг до 1000+ резюме")
@@ -996,6 +1001,7 @@ async def bulk_upload_candidates(
     3. Резюме обрабатываются ПАРАЛЛЕЛЬНО батчами по 4 штуки
     4. Используется ротация API ключей
     5. Максимум 10 одновременных запросов к DeepSeek
+    6. НОВОЕ: Отправка email с логином и паролем новым пользователям
     """
     import zipfile
     from io import BytesIO
@@ -1028,15 +1034,15 @@ async def bulk_upload_candidates(
         print(f"Извлечено {len(pdf_texts)} PDF файлов из архива")
         
         # ПАРАЛЛЕЛЬНАЯ обработка через DeepSeek
-        # batch_size=4 - по 4 резюме в запросе
-        # max_concurrent=10 - до 10 параллельных запросов
-        parsed_resumes = await parse_resumes_with_deepseek_extended(
-            pdf_texts,)
+        parsed_resumes = await parse_resumes_with_deepseek_extended(pdf_texts)
         
         print(f"DeepSeek обработал {len(parsed_resumes)} резюме")
         
         created_candidates = []
         failed = 0
+        
+        # Список для email рассылки (НОВОЕ)
+        email_list = []
         
         for resume_key, resume_data in parsed_resumes.items():
             try:
@@ -1113,6 +1119,7 @@ async def bulk_upload_candidates(
                 finally:
                     session.close()
                 
+                # Добавляем информацию для ответа
                 created_candidates.append({
                     "user_id": user.user_id,
                     "full_name": user.full_name,
@@ -1121,9 +1128,24 @@ async def bulk_upload_candidates(
                     "experience_years": resume_data.get('experience_years')
                 })
                 
+                # НОВОЕ: Добавляем данные для email рассылки
+                email_list.append({
+                    'email': contact_email,
+                    'full_name': user.full_name,
+                    'login': login,
+                    'password': temp_password  # Отправляем исходный пароль, не хеш!
+                })
+                
             except Exception as e:
                 print(f"Ошибка обработки резюме {resume_key}: {e}")
                 failed += 1
+        
+        # НОВОЕ: Массовая отправка email с учетными данными
+        email_result = {"total": 0, "success": 0, "failed": 0, "failed_emails": []}
+        if email_list:
+            print(f"Отправка {len(email_list)} email с учетными данными...")
+            email_result = mass_reg_info(email_list)
+            print(f"Email отправлено: {email_result['success']}/{email_result['total']}")
         
         return {
             "message": f"Успешно обработано {len(created_candidates)} резюме из {len(pdf_texts)}",
@@ -1134,7 +1156,13 @@ async def bulk_upload_candidates(
             "processing_info": {
                 "total_pdfs": len(pdf_texts),
                 "deepseek_parsed": len(parsed_resumes),
-                "parallel_batches": (len(pdf_texts) + 3) // 4,  # количество батчей
+                "parallel_batches": (len(pdf_texts) + 3) // 4,
+            },
+            # НОВОЕ: Информация об email рассылке
+            "email_notification": {
+                "total_emails_sent": email_result['success'],
+                "failed_emails": email_result['failed'],
+                "failed_email_list": email_result['failed_emails']
             }
         }
         
@@ -1143,8 +1171,6 @@ async def bulk_upload_candidates(
     except Exception as e:
         print(f"Критическая ошибка при загрузке резюме: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
 # ========== ПОЛУЧЕНИЕ КАНДИДАТОВ С ФИЛЬТРАЦИЕЙ ==========
 
 @router.post('/vacancies/{vacancy_id}/candidates/filtered',

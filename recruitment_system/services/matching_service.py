@@ -138,9 +138,9 @@ def calculate_technical_skills_score(
     """
     # Нормализуем для сравнения
     candidate_skills_lower = [s.lower().strip() for s in candidate_skills]
-    required_lower = [s.lower().strip() for s in required_skills]
-    optional_lower = [s.lower().strip() for s in optional_skills]
-    
+    print(candidate_skills_lower)
+    required_skills = [s.lower().replace('"', '').strip(',') for s in required_skills]
+    print(required_skills)
     # Проверяем обязательные навыки
     matched_required = []
     missing_required = []

@@ -87,16 +87,14 @@ app = FastAPI(
     ]
 )
 
-# Настройка CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В продакшене указать конкретные домены
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Подключаем роутер
 app.include_router(router)
 
 
@@ -112,7 +110,6 @@ def custom_openapi():
         routes=app.routes,
     )
     
-    # Добавляем схему безопасности для JWT
     openapi_schema["components"]["securitySchemes"] = {
         "HTTPBearer": {
             "type": "http",

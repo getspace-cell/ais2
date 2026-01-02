@@ -263,6 +263,19 @@ class ResumeResponseDTO(BaseModel):
     education: Optional[str]
     work_experience: Optional[str]
     skills: Optional[str]
+    technical_skills: Optional[object]
+    soft_skills : Optional[object]
+    languages : Optional[object]
+    certifications : Optional[object]
+    projects : Optional[object]
+    desired_position : Optional[str]
+    desired_salary : Optional[int]
+    experience_years : Optional[int]
+    
+    # AI анализ резюме (для справки)
+    ai_summary : Optional[str]
+    ai_strengths : Optional[object]
+    ai_weaknesses: Optional[object]
     created_at: datetime
     
     class Config:
